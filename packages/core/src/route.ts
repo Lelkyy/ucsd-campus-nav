@@ -83,10 +83,11 @@ export type ProfileId = keyof typeof PROFILES;
 
 /** The commute options offered in the app. */
 export const MODES = {
-  walk: { label: "Walk", profile: PROFILES.walk, transit: false },
-  accessible: { label: "No stairs", profile: PROFILES.accessible, transit: false },
-  bike: { label: "Bike", profile: PROFILES.bike, transit: false },
-  bus: { label: "Bus", profile: PROFILES.walk, transit: true },
+  walk: { label: "Walk", profile: PROFILES.walk, transit: false, walkWeight: 1 },
+  accessible: { label: "No stairs", profile: PROFILES.accessible, transit: false, walkWeight: 1 },
+  bike: { label: "Bike", profile: PROFILES.bike, transit: false, walkWeight: 1 },
+  // Bus mode is for people who'd rather not walk: it minimises walking, not total time.
+  bus: { label: "Bus", profile: PROFILES.walk, transit: true, walkWeight: 10 },
 } as const;
 
 export type ModeId = keyof typeof MODES;
@@ -99,6 +100,12 @@ export interface RouteOptions {
   /** Shuttle network to ride (walking profiles only), or null/undefined for none. */
   transit?: TransitNetwork | null;
   departAt?: Date;
+  /**
+   * How much a second of walking (or riding) costs compared with a second of
+   * waiting or riding a shuttle. 1 = fastest trip; higher = less walking, even if
+   * the trip takes longer (e.g. 10: one minute less walking is worth ten minutes).
+   */
+  walkWeight?: number;
 }
 
 /** A stretch on foot or by bike. */
@@ -141,8 +148,8 @@ export interface Route {
 
 /** Arrive at the stop this early; a bus that leaves sooner is missed. */
 const BOARD_BUFFER_S = 60;
-/** Extra perceived cost per boarding, so a one-stop hop doesn't beat a short walk. */
-const BOARD_PENALTY_S = 180;
+/** Extra perceived cost per boarding: a nudge against needless transfers. */
+const BOARD_PENALTY_S = 60;
 /** Upper bound on travel speed for the heuristic when riding a shuttle is allowed. */
 const MAX_TRANSIT_SPEED_MPS = 25;
 
@@ -168,6 +175,7 @@ export function findRoute(
   // Shuttles are only combined with walking.
   const transit = profile.travel === "walk" ? (opts.transit ?? null) : null;
   const departAt = opts.departAt ?? new Date();
+  const walkWeight = transit ? (opts.walkWeight ?? 1) : 1;
   if (targets.length === 0 || starts.length === 0) return null;
 
   const n = graph.nodeCount;
@@ -226,11 +234,12 @@ export function findRoute(
         const speed = profile.speed[kind];
         if (!speed) continue;
         const dt = graph.edgeLength[e] / speed;
-        relax(graph.other(e, u), u, cost[u] + dt * (profile.prefer?.[kind] ?? 1), clock[u] + dt, { kind: "edge", edge: e });
+        const c = cost[u] + dt * (profile.prefer?.[kind] ?? 1) * walkWeight;
+        relax(graph.other(e, u), u, c, clock[u] + dt, { kind: "edge", edge: e });
       }
       for (const { stop, meters } of transit?.nodeStops.get(u) ?? []) {
         const dt = meters / WALKING_SPEED_MPS;
-        relax(n + stop, u, cost[u] + dt, clock[u] + dt, { kind: "toStop" });
+        relax(n + stop, u, cost[u] + dt * walkWeight, clock[u] + dt, { kind: "toStop" });
       }
       continue;
     }
@@ -239,7 +248,7 @@ export function findRoute(
     const s = u - n;
     const net = transit!;
     const walkOff = net.stopWalkMeters[s] / WALKING_SPEED_MPS;
-    relax(net.data.stops[s].node, u, cost[u] + walkOff, clock[u] + walkOff, { kind: "fromStop" });
+    relax(net.data.stops[s].node, u, cost[u] + walkOff * walkWeight, clock[u] + walkOff, { kind: "fromStop" });
     const ready = base + clock[u] + BOARD_BUFFER_S;
     for (const { pattern, pos: p } of net.stopPatterns[s]) {
       const pat = net.data.patterns[pattern];
@@ -327,6 +336,7 @@ function buildRoute(
     last = node;
   }
   if (legs.length === 0) legs.push(newMove(pos(start)));
+  mergeStayOnBoard(legs);
 
   // Timeline: travel before the first bus is timed backwards from its departure.
   const firstBus = legs.findIndex((l) => l.mode === "bus");
@@ -352,6 +362,26 @@ function buildRoute(
     arriveAt,
     usesTransit: firstBus !== -1,
   };
+}
+
+/**
+ * A loop shuttle that finishes its run and starts the next one at the same stop
+ * shows up as two rides on the same route: present it as one ("stay on board").
+ */
+function mergeStayOnBoard(legs: Leg[]): void {
+  for (let i = legs.length - 1; i > 0; i--) {
+    const [a, b] = [legs[i - 1], legs[i]];
+    if (a.mode === "bus" && b.mode === "bus" && a.route.id === b.route.id && a.to.id === b.from.id) {
+      legs.splice(i - 1, 2, {
+        ...a,
+        coordinates: [...a.coordinates, ...b.coordinates],
+        headsign: b.headsign,
+        to: b.to,
+        stopCount: a.stopCount + b.stopCount,
+        arrives: b.arrives,
+      });
+    }
+  }
 }
 
 /**
@@ -389,7 +419,9 @@ export function findRouteArriveBy(
   }
   if (!best) return walking;
   if (!best.usesTransit) best = walking ?? best;
-  // Prefer whichever lets you leave later.
+  // Minimising walking: the search already chose the bus over walking on purpose.
+  if ((opts.walkWeight ?? 1) > 1) return best;
+  // Fastest trip: prefer whichever lets you leave later.
   return walking && walking.leaveAt >= best.leaveAt ? walking : best;
 }
 

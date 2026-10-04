@@ -1,5 +1,6 @@
 import {
   MODES,
+  checkBusRoute,
   endpointLabel,
   endpointPosition,
   nextOccurrence,
@@ -15,7 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BuildingSearch } from "./BuildingSearch.tsx";
 import { loadCampus, storage, type CampusData } from "./data.ts";
 import { EditPanel, type EditTool } from "./EditPanel.tsx";
-import { Itinerary, formatTime } from "./Itinerary.tsx";
+import { Itinerary, formatDistance, formatTime } from "./Itinerary.tsx";
 import { KIND_COLORS, MapView, type RouteLine } from "./MapView.tsx";
 import { SchedulePanel } from "./SchedulePanel.tsx";
 import { useSchedule } from "./useSchedule.ts";
@@ -26,8 +27,6 @@ const CUSTOM_API = "/__dev/custom-paths";
 const DRAFT_SNAP_METERS = 5;
 /** Aim to reach class this many minutes early. */
 const CLASS_BUFFER_MIN = 2;
-/** Suggest the bus when it gets you there at least this much sooner. */
-const BUS_SUGGEST_MIN = 5;
 const BIKE_COLOR = "#16a34a";
 const MODE_ICONS: Record<ModeId, string> = { walk: "🚶", accessible: "♿", bike: "🚲", bus: "🚌" };
 
@@ -108,26 +107,48 @@ export function App() {
         ? planRoute(data.graph, a, b, {
             profile: MODES[m].profile,
             transit: MODES[m].transit ? data.transit : null,
+            walkWeight: MODES[m].walkWeight,
             arriveBy: when,
           })
         : null,
     [data],
   );
 
-  const plan = useMemo(() => (from && to ? planFor(mode, from, to, arriveBy?.at) : null), [planFor, mode, from, to, arriveBy]);
+  // The bus is only offered when it's a realistic alternative to walking this trip.
+  const bus = useMemo(() => {
+    if (!from || !to) return null;
+    const busPlan = planFor("bus", from, to, arriveBy?.at);
+    const walkPlan = planFor("walk", from, to, arriveBy?.at);
+    const busRoute = busPlan?.ok ? busPlan.route : null;
+    const walkRoute = walkPlan?.ok ? walkPlan.route : null;
+    return { plan: busPlan, walkPlan, walkRoute, check: checkBusRoute(busRoute, walkRoute, arriveBy?.at) };
+  }, [planFor, from, to, arriveBy]);
+  const busUnavailable = bus && !bus.check.ok ? bus.check.reason : null;
+
+  // "No stairs" is only offered when a step-free route exists.
+  const stepFreePlan = useMemo(
+    () => (from && to ? planFor("accessible", from, to, arriveBy?.at) : null),
+    [planFor, from, to, arriveBy],
+  );
+  const noStairsUnavailable = stepFreePlan && !stepFreePlan.ok ? "Every route there has stairs." : null;
+
+  const plan = useMemo(() => {
+    if (!from || !to) return null;
+    // Bus picked but not realistic for this trip: show the walk instead (and say why).
+    if (mode === "bus") return busUnavailable ? (bus?.walkPlan ?? null) : (bus?.plan ?? null);
+    // Likewise "No stairs" with no step-free route: show the walk, with a note.
+    if (mode === "accessible") return noStairsUnavailable ? (bus?.walkPlan ?? null) : stepFreePlan;
+    return planFor(mode, from, to, arriveBy?.at);
+  }, [planFor, mode, from, to, arriveBy, bus, busUnavailable, stepFreePlan, noStairsUnavailable]);
   const route = plan?.ok ? plan.route : null;
 
-  // Walking: check whether the bus would help (or is the only way there).
+  // Walking: point out a realistic shuttle that saves a good chunk of walking.
   const busSuggestion = useMemo(() => {
-    if (!from || !to || (mode !== "walk" && mode !== "accessible")) return null;
-    const alt = planFor("bus", from, to, arriveBy?.at);
-    if (!alt?.ok || !alt.route.usesTransit) return null;
-    if (!route) return { route: alt.route, savedMin: null };
-    const saved = arriveBy
-      ? (alt.route.leaveAt.getTime() - route.leaveAt.getTime()) / 60_000
-      : (route.arriveAt.getTime() - alt.route.arriveAt.getTime()) / 60_000;
-    return saved >= BUS_SUGGEST_MIN ? { route: alt.route, savedMin: Math.round(saved) } : null;
-  }, [planFor, from, to, mode, arriveBy, route]);
+    if ((mode !== "walk" && mode !== "accessible") || !bus?.check.ok || !bus.plan?.ok) return null;
+    const busRoute = bus.plan.route;
+    const savedMeters = route ? route.meters - busRoute.meters : null;
+    return { route: busRoute, savedMeters };
+  }, [mode, bus, route]);
 
   /** When to leave the current start for a class (null without a start or a route). */
   const estimateClass = useCallback(
@@ -135,9 +156,21 @@ export function App() {
       const start = from ?? (myLocation ? ({ kind: "point", lngLat: myLocation, label: "My location" } as Endpoint) : null);
       const building = data?.buildingById.get(buildingId);
       if (!start || !building) return null;
-      const m: ModeId = building.access === "shuttle" && mode !== "bike" ? "bus" : mode;
-      const p = planFor(m, start, { kind: "building", building }, new Date(startsAt.getTime() - CLASS_BUFFER_MIN * 60_000));
-      return p?.ok ? p.route : null;
+      const arrive = new Date(startsAt.getTime() - CLASS_BUFFER_MIN * 60_000);
+      const dest: Endpoint = { kind: "building", building };
+      if (mode === "bus" || (building.access === "shuttle" && mode !== "bike")) {
+        // Same rule as the Bus button: only take the shuttle when it's realistic.
+        const b = planFor("bus", start, dest, arrive);
+        const w = planFor("walk", start, dest, arrive);
+        const busRoute = b?.ok ? b.route : null;
+        const walkRoute = w?.ok ? w.route : null;
+        return checkBusRoute(busRoute, walkRoute, arrive).ok ? busRoute : walkRoute;
+      }
+      const p = planFor(mode, start, dest, arrive);
+      if (p?.ok) return p.route;
+      // No step-free route there: still say when to leave, using the walk.
+      const w = mode === "accessible" ? planFor("walk", start, dest, arrive) : null;
+      return w?.ok ? w.route : null;
     },
     [data, from, myLocation, mode, planFor],
   );
@@ -268,6 +301,8 @@ export function App() {
                     role="radio"
                     aria-checked={mode === id}
                     className={mode === id ? "on" : ""}
+                    disabled={(id === "bus" && !!busUnavailable) || (id === "accessible" && !!noStairsUnavailable)}
+                    title={(id === "bus" && busUnavailable) || (id === "accessible" && noStairsUnavailable) || undefined}
                     onClick={() => setMode(id)}
                   >
                     <span aria-hidden>{MODE_ICONS[id]}</span>
@@ -321,15 +356,19 @@ export function App() {
                 </p>
               )}
               {hint && <p className="hint">{hint}</p>}
+              {mode === "bus" && busUnavailable && (
+                <p className="hint">No realistic shuttle for this trip: {busUnavailable.toLowerCase()} Showing the walk.</p>
+              )}
+              {mode === "accessible" && noStairsUnavailable && (
+                <p className="hint">There's no step-free route to this destination. Showing the route with stairs.</p>
+              )}
               {plan && !plan.ok && !busSuggestion && <p className="hint">{plan.error}</p>}
               {busSuggestion && (
                 <div className="suggest">
                   <span>
-                    {busSuggestion.savedMin === null
+                    {busSuggestion.savedMeters === null
                       ? "Only reachable by shuttle from here."
-                      : arriveBy
-                        ? `The shuttle lets you leave ${busSuggestion.savedMin} min later`
-                        : `The shuttle gets you there ${busSuggestion.savedMin} min sooner`}{" "}
+                      : `Walk ${formatDistance(busSuggestion.route.meters)} instead of ${formatDistance(busSuggestion.route.meters + busSuggestion.savedMeters)} by shuttle`}{" "}
                     ({busName(busSuggestion.route)}, arrive {formatTime(busSuggestion.route.arriveAt)})
                   </span>
                   <button className="primary" onClick={() => setMode("bus")}>

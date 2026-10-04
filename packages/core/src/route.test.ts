@@ -5,6 +5,7 @@ import { PROFILES, findRoute, findRouteArriveBy } from "./route.ts";
 import { nextClass, type ClassMeeting } from "./schedule.ts";
 import { formatCourseCode, searchCourses, sectionChoices, type CourseSections, type SectionsData } from "./sections.ts";
 import { TransitNetwork, type TransitData } from "./transit.ts";
+import { checkBusRoute } from "./plan.ts";
 import { EdgeKind, type Building, type GraphData } from "./types.ts";
 
 // Small synthetic graph, ~111 m per 0.001° of latitude:
@@ -176,6 +177,84 @@ describe("findRoute (shuttle)", () => {
     const bus = r.legs.find((l) => l.mode === "bus")!;
     expect(bus.mode === "bus" && bus.departs.getTime()).toBe(at(10, 30).getTime());
     expect(r.arriveAt <= at(10, 45)).toBe(true);
+  });
+});
+
+describe("bus mode: minimise walking", () => {
+  // 1.1 km of path (0 -> 1), with a shuttle between the two ends.
+  const g = new CampusGraph({
+    ...tiny,
+    coords: [0, 0, 0, 0.01],
+    edges: [0, 1, EdgeKind.Path],
+    components: [0, 0],
+    bikeComponents: [0, 0],
+  });
+  const at = (h: number, m = 0) => new Date(2026, 9, 7, h, m);
+  const data: TransitData = {
+    version: 1,
+    generatedAt: "",
+    feeds: [],
+    stops: [
+      { id: "a", name: "A", lngLat: [0, 0], node: 0 },
+      { id: "b", name: "B", lngLat: [0, 0.01], node: 1 },
+      { id: "c", name: "C", lngLat: [0, 0.01], node: 1 },
+    ],
+    routes: [{ id: "r", short: "L", long: "Loop", color: "#000" }],
+    services: [{ days: [true, true, true, true, true, true, true], start: "20260101", end: "20261231", added: [], removed: [] }],
+    patterns: [
+      // Leaves in 15 min, so walking (~14 min) gets there first.
+      { route: 0, headsign: "B", stops: [0, 1], shape: [[0, 0], [0, 0.01]], shapeIndex: [0, 1], trips: [{ service: 0, times: [10.25 * 3600, 10.25 * 3600 + 300] }] },
+    ],
+  };
+  const transit = new TransitNetwork(data, g);
+
+  it("fastest-trip routing walks", () => {
+    expect(findRoute(g, 0, [1], { transit, departAt: at(10) })!.usesTransit).toBe(false);
+  });
+
+  it("minimise-walking routing waits for the bus", () => {
+    const r = findRoute(g, 0, [1], { transit, departAt: at(10), walkWeight: 10 })!;
+    expect(r.usesTransit).toBe(true);
+    expect(r.meters).toBeLessThan(10);
+  });
+
+  it("counts a bus that saves the walk as realistic, and one that doesn't as not", () => {
+    const busR = findRoute(g, 0, [1], { transit, departAt: at(10), walkWeight: 10 })!;
+    const walkR = findRoute(g, 0, [1], { departAt: at(10) })!;
+    expect(checkBusRoute(busR, walkR).ok).toBe(true);
+    expect(checkBusRoute(walkR, walkR).ok).toBe(false);
+    const late = findRoute(g, 0, [1], { transit, departAt: at(9), walkWeight: 10 })!; // waits 75 min
+    expect(checkBusRoute(late, findRoute(g, 0, [1], { departAt: at(9) })).ok).toBe(false);
+  });
+
+  it("merges a loop that continues as its next run into one ride", () => {
+    // A -- B -- C along a 2.2 km path; the loop runs A->B, then its next run B->C.
+    const g3 = new CampusGraph({
+      ...tiny,
+      coords: [0, 0, 0, 0.01, 0, 0.02],
+      edges: [0, 1, EdgeKind.Path, 1, 2, EdgeKind.Path],
+      components: [0, 0, 0],
+      bikeComponents: [0, 0, 0],
+    });
+    const loop = new TransitNetwork(
+      {
+        ...data,
+        stops: [
+          { id: "a", name: "A", lngLat: [0, 0], node: 0 },
+          { id: "b", name: "B", lngLat: [0, 0.01], node: 1 },
+          { id: "c", name: "C", lngLat: [0, 0.02], node: 2 },
+        ],
+        patterns: [
+          { route: 0, headsign: "B", stops: [0, 1], shape: [[0, 0], [0, 0.01]], shapeIndex: [0, 1], trips: [{ service: 0, times: [36000, 36060] }] },
+          { route: 0, headsign: "C", stops: [1, 2], shape: [[0, 0.01], [0, 0.02]], shapeIndex: [0, 1], trips: [{ service: 0, times: [36120, 36180] }] },
+        ],
+      },
+      g3,
+    );
+    const r = findRoute(g3, 0, [2], { transit: loop, departAt: at(9, 58), walkWeight: 10 })!;
+    const rides = r.legs.filter((l) => l.mode === "bus");
+    expect(rides).toHaveLength(1);
+    expect(rides[0].mode === "bus" && [rides[0].from.name, rides[0].to.name, rides[0].stopCount]).toEqual(["A", "C", 2]);
   });
 });
 

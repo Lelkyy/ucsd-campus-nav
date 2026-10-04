@@ -18,6 +18,10 @@ const BASE_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 const SATELLITE_TILES =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 const CAMPUS_CENTER: LngLat = [-117.2376, 32.8801];
+/** A little room around the campus data's bounding box so edge buildings aren't flush to the screen edge. */
+const CAMPUS_PADDING_DEG = 0.002;
+/** Roughly "whole campus on a laptop screen". */
+const MIN_ZOOM = 14;
 
 export const KIND_COLORS: Record<EdgeKind, string> = {
   [EdgeKind.Path]: "#2f80ed",
@@ -72,11 +76,18 @@ export function MapView(props: MapViewProps) {
   callbacks.current = props;
 
   useEffect(() => {
+    // Keep the map on campus: no panning away, no zooming out past it.
+    const [w, sth, e, n] = props.graph.data.bbox;
     const map = new MlMap({
       container: container.current!,
       style: BASE_STYLE,
       center: CAMPUS_CENTER,
       zoom: 15.6,
+      maxBounds: [
+        [w - CAMPUS_PADDING_DEG, sth - CAMPUS_PADDING_DEG],
+        [e + CAMPUS_PADDING_DEG, n + CAMPUS_PADDING_DEG],
+      ],
+      minZoom: MIN_ZOOM,
       attributionControl: { compact: true },
     });
     mapRef.current = map;
