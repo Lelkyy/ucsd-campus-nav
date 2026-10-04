@@ -1,6 +1,7 @@
 import { distanceMeters } from "./geo.ts";
 import type { CampusGraph } from "./graph.ts";
 import type { BusLeg, MoveLeg, Route } from "./route.ts";
+import { routeLabel } from "./transit.ts";
 import { EdgeKind, type LngLat } from "./types.ts";
 
 export type Maneuver =
@@ -154,7 +155,7 @@ function busSteps(leg: BusLeg, offset: number): Step[] {
   return [
     {
       maneuver: "board",
-      text: `Board the ${leg.route.short} ${leg.route.long}${leg.headsign && leg.headsign !== leg.route.long ? ` toward ${leg.headsign}` : ""} at ${time(leg.departs)}`,
+      text: `Board the ${routeLabel(leg.route)}${leg.headsign && leg.headsign !== leg.route.long ? ` toward ${leg.headsign}` : ""} at ${time(leg.departs)}`,
       at: leg.from.lngLat,
       along: offset,
       distance: 0,

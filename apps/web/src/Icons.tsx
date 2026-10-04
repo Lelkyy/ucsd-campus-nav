@@ -106,3 +106,14 @@ export const ChevronIcon = ({ up }: { up?: boolean }) => (
     <path d={up ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"} />
   </Icon>
 );
+
+export const TrolleyIcon = () => (
+  <Icon>
+    <path d="M9 2.5h6M12 2.5V5" />
+    <rect x="5.5" y="5" width="13" height="13" rx="3" />
+    <path d="M5.5 11.5h13" />
+    <path d="M8.5 21l1.5-3M15.5 21L14 18" />
+    <circle cx="9" cy="15" r=".6" fill="currentColor" />
+    <circle cx="15" cy="15" r=".6" fill="currentColor" />
+  </Icon>
+);

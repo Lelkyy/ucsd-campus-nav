@@ -10,3 +10,4 @@ export * from "./sections.ts";
 export * from "./instructions.ts";
 export * from "./nav.ts";
 export * from "./indoor.ts";
+export * from "./fares.ts";

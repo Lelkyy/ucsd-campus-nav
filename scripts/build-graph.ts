@@ -26,10 +26,11 @@ import {
   type LngLat,
   type PlacesData,
   type SectionsData,
+  type FeedFare,
   type TransitData,
   type TransitPattern,
 } from "@campus/core";
-import { readGtfs, toSeconds } from "./gtfs.ts";
+import { readGtfs, toSeconds, type Row } from "./gtfs.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RAW_OSM = join(ROOT, "data/raw/osm.json");
@@ -39,6 +40,7 @@ const BLOCKED_PATH = join(ROOT, "data/blocked-ways.json");
 const CODES_PATH = join(ROOT, "data/building-codes.json");
 const ROOMS_PATH = join(ROOT, "data/rooms.json");
 const PLACES_PATH = join(ROOT, "data/places.json");
+const FARES_PATH = join(ROOT, "data/fares.json");
 /** Current-term schedule exported from TSS (login-only, so kept out of git). */
 const PRIVATE_DIR = join(ROOT, "data/private");
 
@@ -67,6 +69,15 @@ const FEEDS = [
     name: "Triton Transit",
     attribution: "Shuttle schedules: UC San Diego Triton Transit (GTFS)",
     url: "https://api.us.sparelabs.com/v1/fixedRoute/public/21c87bba-e136-41bc-ba9a-191bdb3e08e4/gtfs.zip",
+    areaOnly: false,
+  },
+  {
+    // County-wide; only the stops in our area (and trips through them) are kept.
+    id: "mts",
+    name: "MTS",
+    attribution: "Bus and trolley schedules: San Diego MTS (GTFS)",
+    url: "https://www.sdmts.com/google_transit_files/google_transit.zip",
+    areaOnly: true,
   },
 ];
 type Feed = (typeof FEEDS)[number];
@@ -285,7 +296,15 @@ async function main() {
   };
 
   // --- Shuttle stops (GTFS).
-  const feeds = FEEDS.map((feed) => ({ feed, gtfs: readGtfs(readFileSync(join(RAW_GTFS_DIR, `${feed.id}.zip`))) }));
+  const [bs, bw, bn, be] = BBOX;
+  const inArea = (s: Row) => {
+    const [lat, lon] = [Number(s.stop_lat), Number(s.stop_lon)];
+    return lat >= bs && lat <= bn && lon >= bw && lon <= be;
+  };
+  const feeds = FEEDS.map((feed) => ({
+    feed,
+    gtfs: readGtfs(readFileSync(join(RAW_GTFS_DIR, `${feed.id}.zip`)), feed.areaOnly ? { keepStop: inArea } : {}),
+  }));
   const stopPositions = feeds.flatMap(({ gtfs }) =>
     gtfs.stops.filter((s) => !s.location_type || s.location_type === "0").map((s) => [Number(s.stop_lon), Number(s.stop_lat)] as LngLat),
   );
@@ -508,7 +527,7 @@ async function main() {
       `blocked ways ${blockedCount}, custom paths ${customCount}`,
       `campus buildings ${buildings.length}: ${count("walk")} on foot, ${count("shuttle")} shuttle-only, ` +
         `${buildings.filter((b) => b.entranceCount > 0).length} with mapped entrances (${offCampusCount} off-campus skipped)`,
-      `shuttle: ${transit.routes.length} routes, ${transit.stops.length} stops, ${transit.patterns.reduce((sum, p) => sum + p.trips.length, 0)} trips`,
+      `transit: ${new Set(transit.patterns.map((p) => p.route)).size} routes in use, ${transit.stops.length} stops, ${transit.patterns.reduce((sum, p) => sum + p.trips.length, 0)} trips`,
       `doors: ${buildings.reduce((n, b) => n + (b.entrances?.length ?? 0), 0)} mapped on ${buildings.filter((b) => b.entrances).length} buildings; ` +
         `elevators in ${buildings.filter((b) => b.elevators).length}; indoor rooms in ${Object.keys(indoor).length} (${Object.values(indoor).flat().length} rooms)`,
       `places: ${places.places.filter((p) => p.kind === "lingo").length} student place names, ${places.places.filter((p) => p.kind === "stop").length} stops, ${Object.keys(places.tips).length} tips`,
@@ -847,6 +866,7 @@ function buildTransit(feeds: { feed: Feed; gtfs: ReturnType<typeof readGtfs> }[]
     routes: [],
     services: [],
     patterns: [],
+    fares: readFares(),
   };
   for (const { feed, gtfs } of feeds) {
     const stopIdx = new Map<string, number>();
@@ -861,7 +881,11 @@ function buildTransit(feeds: { feed: Feed; gtfs: ReturnType<typeof readGtfs> }[]
     const routeIdx = new Map<string, number>();
     for (const r of gtfs.routes) {
       const color = r.route_color ? `#${r.route_color}` : "#7b61ff";
-      routeIdx.set(r.route_id, data.routes.push({ id: `${feed.id}:${r.route_id}`, short: r.route_short_name, long: r.route_long_name, color }) - 1);
+      const mode = feed.id === "triton" ? "shuttle" : r.route_type === "0" ? "trolley" : "bus";
+      routeIdx.set(
+        r.route_id,
+        data.routes.push({ id: `${feed.id}:${r.route_id}`, short: r.route_short_name, long: r.route_long_name, color, feed: feed.id, mode }) - 1,
+      );
     }
 
     const serviceIdx = new Map<string, number>();
@@ -905,13 +929,16 @@ function buildTransit(feeds: { feed: Feed; gtfs: ReturnType<typeof readGtfs> }[]
       const key = `${trip.route_id}|${stops.join(",")}`;
       let pat = patterns.get(key);
       if (!pat) {
-        const shape = shapeLine(trip.shape_id) ?? stops.map((s) => data.stops[s].lngLat);
+        const fullShape = shapeLine(trip.shape_id) ?? stops.map((s) => data.stops[s].lngLat);
+        // Long lines (the trolley) only need the stretch between our first and last stop.
+        const idx = matchStopsToShape(stops.map((s) => data.stops[s].lngLat), fullShape);
+        const shape = fullShape.slice(idx[0], idx[idx.length - 1] + 1);
         pat = {
           route: routeIdx.get(trip.route_id)!,
           headsign: trip.trip_headsign || data.stops[stops[stops.length - 1]].name,
           stops,
           shape: shape.map(([x, y]) => [round(x), round(y)] as LngLat),
-          shapeIndex: matchStopsToShape(stops.map((s) => data.stops[s].lngLat), shape),
+          shapeIndex: idx.map((i) => i - idx[0]),
           trips: [],
         };
         patterns.set(key, pat);
@@ -924,6 +951,14 @@ function buildTransit(feeds: { feed: Feed; gtfs: ReturnType<typeof readGtfs> }[]
     }
   }
   return data;
+}
+
+function readFares(): Record<string, FeedFare> {
+  const file = JSON.parse(readFileSync(FARES_PATH, "utf8")) as { feeds: Record<string, FeedFare> };
+  for (const feed of FEEDS) {
+    if (!file.feeds[feed.id]) throw new Error(`data/fares.json has no fare for feed "${feed.id}"`);
+  }
+  return file.feeds;
 }
 
 /** Index of the shape point nearest each stop, never going backwards along the shape. */

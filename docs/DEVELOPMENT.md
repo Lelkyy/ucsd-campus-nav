@@ -136,17 +136,33 @@ their description. Turn reports into tickets, then fix them one of two ways:
 - Few buildings have mapped entrances (45 of 346). Adding `entrance=*` nodes in
   OSM makes routes end at real doors. Good ticket material.
 
-## Shuttles
+## Transit
 
-Bus mode routes on [Triton Transit](https://transportation.ucsd.edu/campus/shuttles/gtfs.html)'s
-published timetable (GTFS): walk to a stop, ride, walk on. For a class, it plans
-backwards from the start time. Times are scheduled, not live, and MTS buses and
-the trolley aren't included yet (their GTFS feed would plug into the `FEEDS` list).
+Transit mode routes on two GTFS timetables (the `FEEDS` list in
+`scripts/build-graph.ts`):
+
+- **Triton Transit** campus shuttles (free).
+- **San Diego MTS**: buses and the Blue Line trolley. The feed is county-wide,
+  so the build keeps only stops in our area and the trips through them (the
+  Blue Line, buses 30, 41, 201/202, 237, 921, 985).
+
+Routing minimises walking (a minute of walking counts as ten riding or
+waiting). If that route isn't realistic (it must save 250 m and 30% of the walk
+and take at most 20 min longer than walking), the planner falls back to routes
+that weigh time more before giving up.
+
+**Fares** come from `data/fares.json`, because the MTS feed's fare tables lag
+behind fare changes. A one-way MTS fare ($3 since Oct 1, 2026) covers transfers
+within 2 hours; Triton shuttles are free; the UCSD U-Pass (in student fees)
+makes MTS free, and the app assumes you have one unless you untick it. Update
+`data/fares.json` when MTS changes prices.
 
 ## Data & licenses
 
 - Paths and buildings: © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/).
   Derived databases you publish must stay under ODbL.
 - Basemap: [OpenFreeMap](https://openfreemap.org).
+- Transit schedules: UC San Diego Triton Transit and San Diego MTS (GTFS; MTS's
+  terms forbid using its trademarks or implying endorsement).
 - Satellite imagery: Esri World Imagery, used for development/tracing. A public
   release should use a provider whose terms cover end-user display.

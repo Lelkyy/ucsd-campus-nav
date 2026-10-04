@@ -86,8 +86,9 @@ export const MODES = {
   walk: { label: "Walk", profile: PROFILES.walk, transit: false, walkWeight: 1 },
   accessible: { label: "No stairs", profile: PROFILES.accessible, transit: false, walkWeight: 1 },
   bike: { label: "Bike", profile: PROFILES.bike, transit: false, walkWeight: 1 },
-  // Bus mode is for people who'd rather not walk: it minimises walking, not total time.
-  bus: { label: "Bus", profile: PROFILES.walk, transit: true, walkWeight: 10 },
+  // Transit (shuttles, MTS buses, the trolley) is for people who'd rather not walk:
+  // it minimises walking, not total time.
+  bus: { label: "Transit", profile: PROFILES.walk, transit: true, walkWeight: 10 },
 } as const;
 
 export type ModeId = keyof typeof MODES;

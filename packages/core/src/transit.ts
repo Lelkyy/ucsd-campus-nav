@@ -7,6 +7,8 @@ export interface TransitData {
   version: 1;
   generatedAt: string;
   feeds: { id: string; name: string; attribution: string }[];
+  /** Fare rules per feed id. */
+  fares: Record<string, FeedFare>;
   stops: TransitStop[];
   routes: TransitRoute[];
   services: TransitService[];
@@ -27,6 +29,29 @@ export interface TransitRoute {
   long: string;
   /** "#rrggbb" */
   color: string;
+  /** Which feed (and so which fare) it belongs to: "triton", "mts". */
+  feed: string;
+  mode: "shuttle" | "bus" | "trolley";
+}
+
+export interface FeedFare {
+  name: string;
+  /** Adult one-way fare in USD (0 = free). */
+  oneWay: number;
+  /** One fare covers transfers on the same system within this many minutes. */
+  transferMinutes?: number;
+  /** Free for UC San Diego students with the U-Pass. */
+  upassFree?: boolean;
+  note?: string;
+  source?: string;
+  effective?: string;
+}
+
+/** "Blue Line trolley", "MTS 30", "S SIO Shuttle". */
+export function routeLabel(r: TransitRoute): string {
+  if (r.mode === "trolley") return `${r.short} Line trolley`;
+  if (r.mode === "bus") return `MTS ${r.short}`;
+  return `${r.short} ${r.long}`;
 }
 
 export interface TransitService {

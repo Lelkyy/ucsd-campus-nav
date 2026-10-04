@@ -1,7 +1,10 @@
 import {
   MODES,
   buildSteps,
-  checkBusRoute,
+  formatFare,
+  planTransit,
+  routeLabel,
+  tripFare,
   insideHints,
   endpointLabel,
   endpointPosition,
@@ -61,6 +64,8 @@ export function App() {
   /** Set when routing to a class: plan backwards from its start time. */
   const [arriveBy, setArriveBy] = useState<{ at: Date; label: string } | null>(null);
   const [clickTarget, setClickTarget] = useState<"from" | "to">("from");
+  /** UC San Diego students ride MTS free with the U-Pass; assume a student unless told otherwise. */
+  const [upass, setUpass] = useState<boolean>(() => storage.get("campus-nav:upass", true));
   const [mode, setMode] = useState<ModeId>(() => {
     const saved = storage.get<string>("campus-nav:mode", "walk");
     return saved in MODES ? (saved as ModeId) : "walk";
@@ -113,6 +118,7 @@ export function App() {
   }, [reload]);
 
   useEffect(() => storage.set("campus-nav:mode", mode), [mode]);
+  useEffect(() => storage.set("campus-nav:upass", upass), [upass]);
 
   const planFor = useCallback(
     (m: ModeId, a: Endpoint, b: Endpoint, when: Date | undefined): Plan | null =>
@@ -128,14 +134,18 @@ export function App() {
   );
 
   // The bus is only offered when it's a realistic alternative to walking this trip.
-  const bus = useMemo(() => {
-    if (!from || !to) return null;
-    const busPlan = planFor("bus", from, to, arriveBy?.at);
-    const walkPlan = planFor("walk", from, to, arriveBy?.at);
-    const busRoute = busPlan?.ok ? busPlan.route : null;
-    const walkRoute = walkPlan?.ok ? walkPlan.route : null;
-    return { plan: busPlan, walkPlan, walkRoute, check: checkBusRoute(busRoute, walkRoute, arriveBy?.at) };
-  }, [planFor, from, to, arriveBy]);
+  /** Transit for a trip: the least-walking realistic option, compared with walking. */
+  const transitFor = useCallback(
+    (a: Endpoint, b: Endpoint, when: Date | undefined) => {
+      if (!data) return null;
+      const walkPlan = planFor("walk", a, b, when);
+      const walkRoute = walkPlan?.ok ? walkPlan.route : null;
+      const t = planTransit(data.graph, a, b, { profile: MODES.bus.profile, transit: data.transit, arriveBy: when }, walkRoute);
+      return { plan: t.plan, check: t.check, walkPlan, walkRoute };
+    },
+    [data, planFor],
+  );
+  const bus = useMemo(() => (from && to ? transitFor(from, to, arriveBy?.at) : null), [transitFor, from, to, arriveBy]);
   const busUnavailable = bus && !bus.check.ok ? bus.check.reason : null;
 
   // "No stairs" is only offered when a step-free route exists.
@@ -182,11 +192,9 @@ export function App() {
       const dest: Endpoint = { kind: "building", building };
       if (mode === "bus" || (building.access === "shuttle" && mode !== "bike")) {
         // Same rule as the Bus button: only take the shuttle when it's realistic.
-        const b = planFor("bus", start, dest, arrive);
-        const w = planFor("walk", start, dest, arrive);
-        const busRoute = b?.ok ? b.route : null;
-        const walkRoute = w?.ok ? w.route : null;
-        return checkBusRoute(busRoute, walkRoute, arrive).ok ? busRoute : walkRoute;
+        const t = transitFor(start, dest, arrive);
+        if (!t) return null;
+        return t.check.ok && t.plan.ok ? t.plan.route : t.walkRoute;
       }
       const p = planFor(mode, start, dest, arrive);
       if (p?.ok) return p.route;
@@ -194,7 +202,7 @@ export function App() {
       const w = mode === "accessible" ? planFor("walk", start, dest, arrive) : null;
       return w?.ok ? w.route : null;
     },
-    [data, from, myLocation, mode, planFor],
+    [data, from, myLocation, mode, planFor, transitFor],
   );
 
   const allPlaces = useMemo(() => [...saved.places, ...(data?.places.places ?? [])], [saved.places, data]);
@@ -440,6 +448,7 @@ export function App() {
                   const Icon = MODE_ICONS[id];
                   const option = options[id];
                   const eta = option.unavailable || !option.plan?.ok ? null : Math.max(1, Math.ceil(option.plan.route.minutes));
+                  const fare = id === "bus" && eta !== null && option.plan?.ok ? tripFare(option.plan.route, data.transit.data.fares, { upass }) : null;
                   return (
                     <button
                       key={id}
@@ -453,6 +462,7 @@ export function App() {
                       <Icon />
                       <span className="mode-label">{MODES[id].label}</span>
                       {from && to && <span className="mode-eta">{eta === null ? "—" : `${eta} min`}</span>}
+                      {fare && <span className="mode-fare">{formatFare(fare.total)}</span>}
                     </button>
                   );
                 })}
@@ -468,7 +478,7 @@ export function App() {
               )}
               {hint && <p className="note warn-note">{hint}</p>}
               {mode === "bus" && busUnavailable && (
-                <p className="note warn-note">No realistic shuttle for this trip: {busUnavailable.toLowerCase()} Showing the walk.</p>
+                <p className="note warn-note">No realistic transit for this trip: {busUnavailable.toLowerCase()} Showing the walk.</p>
               )}
               {mode === "accessible" && noStairsUnavailable && (
                 <p className="note warn-note">There's no step-free route to this destination. Showing the route with stairs.</p>
@@ -488,7 +498,14 @@ export function App() {
               )}
               {route && to && (
                 <>
-                  <Itinerary route={route} destination={endpointLabel(to)} showLeave={!!arriveBy} />
+                  <Itinerary
+                    route={route}
+                    destination={endpointLabel(to)}
+                    showLeave={!!arriveBy}
+                    fare={tripFare(route, data.transit.data.fares, { upass })}
+                    upass={upass}
+                    onUpass={setUpass}
+                  />
                   <button
                     className="primary start"
                     onClick={() => {
@@ -546,8 +563,8 @@ export function App() {
         </div>
 
         <footer className="sheet-foot">
-          Paths © OpenStreetMap contributors · Shuttle times from Triton Transit (scheduled, not live) · Not an official UC
-          San Diego app
+          Paths © OpenStreetMap contributors · Schedules from Triton Transit and San Diego MTS (scheduled, not live) · Not
+          an official UC San Diego app
         </footer>
       </aside>
     </div>
@@ -556,5 +573,5 @@ export function App() {
 
 function busName(route: Route): string {
   const bus = route.legs.find((l) => l.mode === "bus");
-  return bus?.mode === "bus" ? `${bus.route.long} from ${bus.from.name}` : "";
+  return bus?.mode === "bus" ? `${routeLabel(bus.route)} from ${bus.from.name}` : "";
 }

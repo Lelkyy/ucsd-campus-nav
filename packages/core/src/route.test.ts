@@ -141,7 +141,8 @@ describe("findRoute (shuttle)", () => {
       { id: "a", name: "Stop A", lngLat: [0, 0], node: 0 },
       { id: "b", name: "Stop B", lngLat: [0, 0.06], node: 2 },
     ],
-    routes: [{ id: "r", short: "X", long: "Express", color: "#ff0000" }],
+    routes: [{ id: "r", short: "X", long: "Express", color: "#ff0000", feed: "triton", mode: "shuttle" }],
+    fares: {},
     services: [{ days: [true, true, true, true, true, false, false], start: "20260901", end: "20261231", added: [], removed: [] }],
     patterns: [
       {
@@ -199,7 +200,8 @@ describe("bus mode: minimise walking", () => {
       { id: "b", name: "B", lngLat: [0, 0.01], node: 1 },
       { id: "c", name: "C", lngLat: [0, 0.01], node: 1 },
     ],
-    routes: [{ id: "r", short: "L", long: "Loop", color: "#000" }],
+    routes: [{ id: "r", short: "L", long: "Loop", color: "#000", feed: "triton", mode: "shuttle" }],
+    fares: {},
     services: [{ days: [true, true, true, true, true, true, true], start: "20260101", end: "20261231", added: [], removed: [] }],
     patterns: [
       // Leaves in 15 min, so walking (~14 min) gets there first.
