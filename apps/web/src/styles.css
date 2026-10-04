@@ -544,3 +544,52 @@ button.link.danger { color: var(--danger); }
   .map-tools { top: 12px; left: 12px; right: auto; align-items: flex-start; }
   .modes button { padding: 8px 2px 7px; }
 }
+
+/* ---------- Report a problem ---------- */
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  width: 100%;
+  resize: vertical;
+}
+textarea:focus { outline: none; border-color: var(--focus); background: var(--surface); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; border: none; padding: 0; margin: 0; }
+.chips legend { font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 6px; }
+.chips label {
+  flex-direction: row;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.chips label.on { background: var(--accent-soft); border-color: var(--accent); }
+.chips input { position: absolute; opacity: 0; pointer-events: none; }
+.report-where {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.report-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+a.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-weight: 550;
+  text-decoration: none;
+}
+a.button.primary { background: var(--accent); color: var(--accent-text); }
+a.button.disabled { opacity: 0.45; pointer-events: none; }

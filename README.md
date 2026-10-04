@@ -22,8 +22,8 @@ the way, using the paths, stairs and bike paths students actually use.
 - **Leave-by times:** for your next class, in whichever mode you picked.
 - **Every classroom:** 556 rooms across 84 building codes are mapped to
   buildings; the few that aren't are listed with the reason.
-- **Map editor** (local dev only): trace missing paths and buildings from
-  satellite imagery.
+- **Report a problem:** tap the spot on the map, pick what's wrong, and send it
+  by email (prefilled with the location and details).
 
 ## Run it
 

@@ -56,18 +56,18 @@ export interface MapViewProps {
   /** Include bike-only roads in the network overlay (riding mode). */
   bikeNetwork: boolean;
   showSatellite: boolean;
-  editing: boolean;
-  customPaths: GeoJSON.FeatureCollection;
-  selectedCustomId: string | null;
-  draft: LngLat[];
-  onMapClick: (p: LngLat, customFeatureId: string | null) => void;
+  /** A spot being reported (orange marker). */
+  reportPin: LngLat | null;
+  /** Taps mark a spot rather than set a route endpoint: show a crosshair. */
+  pickingSpot: boolean;
+  onMapClick: (p: LngLat) => void;
   onLocate: (p: LngLat) => void;
 }
 
 export function MapView(props: MapViewProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
-  const markers = useRef<{ from: Marker; to: Marker } | null>(null);
+  const markers = useRef<{ from: Marker; to: Marker; report: Marker } | null>(null);
   const [ready, setReady] = useState(false);
   const lastTrip = useRef<string | null>(null);
 
@@ -103,6 +103,7 @@ export function MapView(props: MapViewProps) {
     markers.current = {
       from: new Marker({ color: "#27ae60" }),
       to: new Marker({ color: "#eb5757" }),
+      report: new Marker({ color: "#f59e0b" }),
     };
 
     map.on("load", () => {
@@ -119,7 +120,7 @@ export function MapView(props: MapViewProps) {
         firstSymbol,
       );
 
-      for (const id of ["network", "custom", "draft", "route", "connectors", "stops"]) {
+      for (const id of ["network", "route", "connectors", "stops"]) {
         map.addSource(id, { type: "geojson", data: EMPTY });
       }
       map.addLayer({
@@ -141,29 +142,6 @@ export function MapView(props: MapViewProps) {
         filter: ["==", ["geometry-type"], "Point"],
         layout: { visibility: "none" },
         paint: { "circle-radius": 2.5, "circle-color": "#fff", "circle-stroke-color": "#2f80ed", "circle-stroke-width": 1 },
-      });
-      map.addLayer({
-        id: "custom",
-        type: "line",
-        source: "custom",
-        filter: ["==", ["geometry-type"], "LineString"],
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": ["case", ["boolean", ["get", "selected"], false], "#ffcd00", KIND_COLORS[EdgeKind.Custom]],
-          "line-width": 5,
-        },
-      });
-      map.addLayer({
-        id: "custom-points",
-        type: "circle",
-        source: "custom",
-        filter: ["==", ["geometry-type"], "Point"],
-        paint: {
-          "circle-radius": 7,
-          "circle-color": ["case", ["boolean", ["get", "selected"], false], "#ffcd00", KIND_COLORS[EdgeKind.Custom]],
-          "circle-stroke-color": "#fff",
-          "circle-stroke-width": 2,
-        },
       });
       map.addLayer({
         id: "stops",
@@ -219,28 +197,10 @@ export function MapView(props: MapViewProps) {
         source: "connectors",
         paint: { "line-color": "#0b3d91", "line-width": 3, "line-dasharray": [1, 1.5] },
       });
-      map.addLayer({
-        id: "draft-line",
-        type: "line",
-        source: "draft",
-        paint: { "line-color": "#ffcd00", "line-width": 4, "line-dasharray": [2, 1] },
-      });
-      map.addLayer({
-        id: "draft-points",
-        type: "circle",
-        source: "draft",
-        filter: ["==", ["geometry-type"], "Point"],
-        paint: { "circle-radius": 5, "circle-color": "#ffcd00", "circle-stroke-color": "#000", "circle-stroke-width": 1 },
-      });
       setReady(true);
     });
 
-    map.on("click", (e) => {
-      const hit = callbacks.current.editing
-        ? map.queryRenderedFeatures(e.point, { layers: ["custom", "custom-points"] })[0]
-        : undefined;
-      callbacks.current.onMapClick([e.lngLat.lng, e.lngLat.lat], (hit?.properties?.id as string) ?? null);
-    });
+    map.on("click", (e) => callbacks.current.onMapClick([e.lngLat.lng, e.lngLat.lat]));
 
     return () => map.remove();
   }, []);
@@ -279,29 +239,6 @@ export function MapView(props: MapViewProps) {
 
   useEffect(() => {
     if (!ready) return;
-    const features = props.editing
-      ? props.customPaths.features.map((f) => ({
-          ...f,
-          properties: { ...f.properties, selected: f.properties?.id === props.selectedCustomId },
-        }))
-      : props.customPaths.features;
-    source(mapRef.current!, "custom").setData({ type: "FeatureCollection", features });
-  }, [ready, props.customPaths, props.selectedCustomId, props.editing]);
-
-  useEffect(() => {
-    if (!ready) return;
-    const d = props.draft;
-    source(mapRef.current!, "draft").setData({
-      type: "FeatureCollection",
-      features: [
-        ...(d.length >= 2 ? [lineFeature(d)] : []),
-        ...d.map((p) => ({ type: "Feature" as const, properties: {}, geometry: { type: "Point" as const, coordinates: p } })),
-      ],
-    });
-  }, [ready, props.draft]);
-
-  useEffect(() => {
-    if (!ready) return;
     const map = mapRef.current!;
     const lines = props.routeLines ?? [];
     source(map, "route").setData({
@@ -315,7 +252,7 @@ export function MapView(props: MapViewProps) {
       type: "FeatureCollection",
       features: props.connectors.map((c) => lineFeature(c)),
     });
-    // Only re-frame when the trip changes, not when the graph reloads after an edit.
+    // Only re-frame when the trip changes, not on every re-render.
     const tripKey = JSON.stringify([callbacks.current.from, callbacks.current.to]);
     const all = lines.flatMap((l) => l.coordinates);
     if (all.length > 1 && tripKey !== lastTrip.current) {
@@ -334,16 +271,17 @@ export function MapView(props: MapViewProps) {
     for (const [marker, pos] of [
       [m.from, props.from],
       [m.to, props.to],
+      [m.report, props.reportPin],
     ] as const) {
       if (pos) marker.setLngLat(pos).addTo(map);
       else marker.remove();
     }
-  }, [props.from, props.to]);
+  }, [props.from, props.to, props.reportPin]);
 
   useEffect(() => {
     const canvas = mapRef.current?.getCanvas();
-    if (canvas) canvas.style.cursor = props.editing ? "crosshair" : "";
-  }, [props.editing]);
+    if (canvas) canvas.style.cursor = props.pickingSpot ? "crosshair" : "";
+  }, [props.pickingSpot]);
 
   return <div ref={container} className="map" />;
 }

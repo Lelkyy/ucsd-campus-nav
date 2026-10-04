@@ -4,8 +4,8 @@
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Dev server at http://localhost:5173, including the **Edit map** tab |
-| `npm run build` | Production build to `apps/web/dist` (editor not included) |
+| `npm run dev` | Dev server at http://localhost:5173 |
+| `npm run build` | Production build to `apps/web/dist` |
 | `npm test` | Routing, schedule and data-coverage tests (includes the real campus data) |
 | `npm run typecheck` | TypeScript across all packages |
 | `npm run build:graph` | Rebuild the map data from cached downloads + edits + private schedule |
@@ -78,24 +78,29 @@ Rooms come from `data/rooms.json` (2025–26, public schedule) plus the private
 Fall 2026 file. Routing goes to the building's door; indoor (floor/room)
 navigation isn't mapped.
 
-## Mapping paths from satellite view
+## Fixing the map
 
-1. `npm run dev`, open **Edit map**. Satellite and the path network turn on.
-2. Zoom in: white dots are existing path nodes. Pick **Path** or **Stairs**,
-   click along the path in the imagery, starting and ending on existing dots so
-   it connects (clicks within 5 m snap to them).
-3. **Save line**. It's written to `data/custom-paths.geojson` and the map data
-   rebuilds immediately.
-4. **Building** adds a named point for a building OSM is missing. Put schedule
-   codes like `SSB` in its aliases, then remove the code from `unplaced`.
+Users report problems from the app's **Report** tab. Each report is an email to
+the address in `apps/web/src/config.ts` (or `VITE_REPORT_EMAIL`), with the
+category, the tapped location (coordinates and an OpenStreetMap link) and
+their description. Turn reports into tickets, then fix them one of two ways:
 
-To remove a wrong OSM path, add its way id to `data/blocked-ways.json`.
+1. **In OpenStreetMap (preferred)** for real, public things: missing paths,
+   building entrances (`entrance=*`), ramps, wrong building names. Use the iD
+   editor or JOSM with Esri World Imagery, which OSM is allowed to trace. Then
+   `npm run fetch:osm` pulls the change in and everyone benefits. Don't trace
+   from Google Maps or UCSD's own map.
+2. **In this repo** for things OSM shouldn't have (temporary detours,
+   shortcuts through buildings):
+   - Add a LineString to `data/custom-paths.geojson` (draw it at
+     [geojson.io](https://geojson.io) and paste it in). `"kind": "steps"` marks
+     stairs. Vertices within 4 m of an existing path node join it.
+   - Add a Point with `"name"` and `"aliases"` for a building OSM is missing.
+     Put its schedule code in the aliases, then remove the code from `unplaced`.
+   - Add an OSM way id to `data/blocked-ways.json` to drop a path that doesn't
+     exist.
 
-**OSM or local edit?** Real, public paths and building entrances are better
-added to OpenStreetMap itself (iD editor or JOSM, with Esri World Imagery, which
-OSM is allowed to trace). The next `npm run fetch:osm` pulls them in and everyone
-benefits. Keep local edits for things OSM shouldn't have (shortcuts through
-buildings, temporary detours). Don't trace from Google Maps or UCSD's own map.
+   Then run `npm run build:graph`.
 
 ### Known data gaps
 

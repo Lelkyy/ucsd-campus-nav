@@ -15,7 +15,6 @@ import {
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { BuildingSearch } from "./BuildingSearch.tsx";
 import { loadCampus, storage, type CampusData } from "./data.ts";
-import { EditPanel, type EditTool } from "./EditPanel.tsx";
 import { Itinerary, formatDistance, formatTime } from "./Itinerary.tsx";
 import { KIND_COLORS, MapView, type RouteLine } from "./MapView.tsx";
 import {
@@ -29,19 +28,16 @@ import {
   SwapIcon,
   WalkIcon,
 } from "./Icons.tsx";
+import { ReportPanel, type RouteContext } from "./ReportPanel.tsx";
 import { NextUp, SchedulePanel } from "./SchedulePanel.tsx";
 import { useSchedule } from "./useSchedule.ts";
 
-const EMPTY_FC: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
-const CUSTOM_API = "/__dev/custom-paths";
-/** Draft vertices this close to an existing node snap onto it, so traced paths connect. */
-const DRAFT_SNAP_METERS = 5;
 /** Aim to reach class this many minutes early. */
 const CLASS_BUFFER_MIN = 2;
 const BIKE_COLOR = "#16a34a";
 const MODE_ICONS: Record<ModeId, () => JSX.Element> = { walk: WalkIcon, accessible: StepFreeIcon, bike: BikeIcon, bus: BusIcon };
 
-type Tab = "go" | "schedule" | "edit";
+type Tab = "go" | "schedule" | "report";
 
 export function App() {
   const [data, setData] = useState<CampusData | null>(null);
@@ -67,12 +63,9 @@ export function App() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [showSatellite, setShowSatellite] = useState(false);
 
-  const [tool, setTool] = useState<EditTool>("path");
-  const [draft, setDraft] = useState<LngLat[]>([]);
-  const [customPaths, setCustomPaths] = useState<GeoJSON.FeatureCollection>(EMPTY_FC);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
+  /** Report tab: the spot tapped on the map, and the route the report is about (if any). */
+  const [reportPin, setReportPin] = useState<LngLat | null>(null);
+  const [reportRoute, setReportRoute] = useState<RouteContext | null>(null);
 
   // Picking a new start or destination by hand means "leave now" again.
   const setFrom = (e: Endpoint | null) => {
@@ -103,16 +96,6 @@ export function App() {
   }, [reload]);
 
   useEffect(() => storage.set("campus-nav:mode", mode), [mode]);
-
-  useEffect(() => {
-    if (tab !== "edit") return;
-    setShowSatellite(true);
-    setShowNetwork(true);
-    fetch(CUSTOM_API)
-      .then((r) => r.json())
-      .then(setCustomPaths)
-      .catch(() => setStatus("Editor API unavailable — run `npm run dev`."));
-  }, [tab]);
 
   const planFor = useCallback(
     (m: ModeId, a: Endpoint, b: Endpoint, when: Date | undefined): Plan | null =>
@@ -224,15 +207,9 @@ export function App() {
     );
   };
 
-  const onMapClick = (p: LngLat, customId: string | null) => {
+  const onMapClick = (p: LngLat) => {
     if (!data) return;
-    if (tab === "edit") {
-      if (customId && draft.length === 0) return setSelectedId(customId === selectedId ? null : customId);
-      if (tool === "building") return setDraft([p]);
-      const node = data.graph.nearestNode(p, { accept: () => true, maxMeters: DRAFT_SNAP_METERS });
-      setDraft((d) => [...d, node === -1 ? p : data.graph.coord(node)]);
-      return;
-    }
+    if (tab === "report") return setReportPin(p);
     const pin: Endpoint = { kind: "point", lngLat: p, label: "Dropped pin" };
     if (clickTarget === "from") {
       setFrom(pin);
@@ -265,26 +242,20 @@ export function App() {
     );
   };
 
-  const saveCustom = async (fc: GeoJSON.FeatureCollection) => {
-    setBusy(true);
-    setStatus("Saving and rebuilding graph…");
-    try {
-      const res = await fetch(CUSTOM_API, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fc),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error);
-      setCustomPaths(fc);
-      setDraft([]);
-      setStatus(body.log);
-      await reload(true);
-    } catch (err) {
-      setStatus(`Save failed: ${(err as Error).message}`);
-    } finally {
-      setBusy(false);
-    }
+  /** Open the Report tab, optionally about the route on screen. */
+  const openReport = (aboutRoute: boolean) => {
+    setReportRoute(
+      aboutRoute && route && from && to
+        ? {
+            from: endpointLabel(from),
+            to: endpointLabel(to),
+            mode: MODES[mode].label,
+            summary: `${Math.ceil(route.minutes)} min, ${formatDistance(route.meters)}`,
+          }
+        : null,
+    );
+    if (aboutRoute && to) setReportPin(endpointPosition(to));
+    setTab("report");
   };
 
   if (loadError) return <div className="fatal">Couldn't load campus data. {loadError}</div>;
@@ -303,10 +274,8 @@ export function App() {
           showNetwork={showNetwork}
           bikeNetwork={mode === "bike"}
           showSatellite={showSatellite}
-          editing={tab === "edit"}
-          customPaths={tab === "edit" ? customPaths : EMPTY_FC}
-          selectedCustomId={selectedId}
-          draft={tab === "edit" ? draft : []}
+          reportPin={tab === "report" ? reportPin : null}
+          pickingSpot={tab === "report"}
           onMapClick={onMapClick}
           onLocate={setMyLocation}
         />
@@ -346,18 +315,9 @@ export function App() {
             <button className={tab === "schedule" ? "on" : ""} aria-current={tab === "schedule"} onClick={() => setTab("schedule")}>
               Schedule{schedule.meetings.length > 0 && <span className="count">{new Set(schedule.meetings.map((m) => m.course)).size}</span>}
             </button>
-            {import.meta.env.DEV && (
-              <button
-                className={tab === "edit" ? "on" : ""}
-                aria-current={tab === "edit"}
-                onClick={() => {
-                  setTab("edit");
-                  setDraft([]);
-                }}
-              >
-                Edit map
-              </button>
-            )}
+            <button className={tab === "report" ? "on" : ""} aria-current={tab === "report"} onClick={() => openReport(false)}>
+              Report
+            </button>
           </nav>
         </header>
 
@@ -469,7 +429,17 @@ export function App() {
                   <button onClick={() => setMode("bus")}>Take it</button>
                 </div>
               )}
-              {route && to && <Itinerary route={route} destination={endpointLabel(to)} showLeave={!!arriveBy} />}
+              {route && to && (
+                <>
+                  <Itinerary route={route} destination={endpointLabel(to)} showLeave={!!arriveBy} />
+                  <p className="muted small">
+                    Something wrong with this route?{" "}
+                    <button className="link" onClick={() => openReport(true)}>
+                      Report it
+                    </button>
+                  </p>
+                </>
+              )}
               {!from && !to && (
                 <p className="muted small empty-hint">Pick a start and a destination, or add your classes in Schedule.</p>
               )}
@@ -477,49 +447,12 @@ export function App() {
           ) : tab === "schedule" ? (
             <SchedulePanel data={data} schedule={schedule} onDirections={onDirections} />
           ) : (
-            <EditPanel
-              tool={tool}
-              onTool={(t) => {
-                setTool(t);
-                setDraft([]);
-              }}
-              draftLength={draft.length}
-              customPaths={customPaths}
-              selectedId={selectedId}
-              busy={busy}
-              status={status}
-              onUndo={() => setDraft((d) => d.slice(0, -1))}
-              onCancelDraft={() => setDraft([])}
-              onFinishLine={() =>
-                saveCustom({
-                  ...customPaths,
-                  features: [
-                    ...customPaths.features,
-                    {
-                      type: "Feature",
-                      properties: { id: crypto.randomUUID(), kind: tool === "steps" ? "steps" : "path" },
-                      geometry: { type: "LineString", coordinates: draft },
-                    },
-                  ],
-                })
-              }
-              onAddBuilding={(name, aliases) =>
-                saveCustom({
-                  ...customPaths,
-                  features: [
-                    ...customPaths.features,
-                    {
-                      type: "Feature",
-                      properties: { id: crypto.randomUUID(), name, aliases },
-                      geometry: { type: "Point", coordinates: draft[0] },
-                    },
-                  ],
-                })
-              }
-              onSelect={setSelectedId}
-              onDelete={(id) =>
-                saveCustom({ ...customPaths, features: customPaths.features.filter((f) => f.properties?.id !== id) })
-              }
+            <ReportPanel
+              buildings={data.buildings}
+              pin={reportPin}
+              onClearPin={() => setReportPin(null)}
+              route={reportRoute}
+              dataDate={data.graph.data.generatedAt.slice(0, 10)}
             />
           )}
         </div>
