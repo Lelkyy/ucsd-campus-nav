@@ -12,13 +12,24 @@ import {
   type Plan,
   type Route,
 } from "@campus/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { BuildingSearch } from "./BuildingSearch.tsx";
 import { loadCampus, storage, type CampusData } from "./data.ts";
 import { EditPanel, type EditTool } from "./EditPanel.tsx";
 import { Itinerary, formatDistance, formatTime } from "./Itinerary.tsx";
 import { KIND_COLORS, MapView, type RouteLine } from "./MapView.tsx";
-import { SchedulePanel } from "./SchedulePanel.tsx";
+import {
+  BikeIcon,
+  BusIcon,
+  ChevronIcon,
+  LocateIcon,
+  PathsIcon,
+  SatelliteIcon,
+  StepFreeIcon,
+  SwapIcon,
+  WalkIcon,
+} from "./Icons.tsx";
+import { NextUp, SchedulePanel } from "./SchedulePanel.tsx";
 import { useSchedule } from "./useSchedule.ts";
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -28,9 +39,9 @@ const DRAFT_SNAP_METERS = 5;
 /** Aim to reach class this many minutes early. */
 const CLASS_BUFFER_MIN = 2;
 const BIKE_COLOR = "#16a34a";
-const MODE_ICONS: Record<ModeId, string> = { walk: "🚶", accessible: "♿", bike: "🚲", bus: "🚌" };
+const MODE_ICONS: Record<ModeId, () => JSX.Element> = { walk: WalkIcon, accessible: StepFreeIcon, bike: BikeIcon, bus: BusIcon };
 
-type Tab = "go" | "edit";
+type Tab = "go" | "schedule" | "edit";
 
 export function App() {
   const [data, setData] = useState<CampusData | null>(null);
@@ -52,6 +63,8 @@ export function App() {
   const [hint, setHint] = useState<string | null>(null);
 
   const [showNetwork, setShowNetwork] = useState(false);
+  /** Phones: the panel is a bottom sheet that can be pulled up. */
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [showSatellite, setShowSatellite] = useState(false);
 
   const [tool, setTool] = useState<EditTool>("path");
@@ -131,6 +144,15 @@ export function App() {
     [planFor, from, to, arriveBy],
   );
   const noStairsUnavailable = stepFreePlan && !stepFreePlan.ok ? "Every route there has stairs." : null;
+  const bikePlan = useMemo(() => (from && to ? planFor("bike", from, to, arriveBy?.at) : null), [planFor, from, to, arriveBy]);
+
+  /** Each mode's option for this trip: its plan, or why it isn't offered. */
+  const options: Record<ModeId, { plan: Plan | null; unavailable: string | null }> = {
+    walk: { plan: bus?.walkPlan ?? null, unavailable: null },
+    accessible: { plan: stepFreePlan, unavailable: noStairsUnavailable },
+    bike: { plan: bikePlan, unavailable: null },
+    bus: { plan: bus?.plan ?? null, unavailable: busUnavailable },
+  };
 
   const plan = useMemo(() => {
     if (!from || !to) return null;
@@ -224,6 +246,7 @@ export function App() {
   const onDirections = (meeting: ClassMeeting) => {
     const building = data?.buildingById.get(meeting.buildingId);
     if (!building) return setHint("That class isn't at a building on the map.");
+    setTab("go");
     setToRaw({ kind: "building", building, room: meeting.room });
     if (myLocation) setFromRaw({ kind: "point", lngLat: myLocation, label: "My location" });
     else if (!from) {
@@ -268,193 +291,6 @@ export function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <header>
-          <h1>Campus Nav</h1>
-          {import.meta.env.DEV && (
-            <nav className="segmented" aria-label="Mode">
-              <button className={tab === "go" ? "on" : ""} onClick={() => setTab("go")}>
-                Directions
-              </button>
-              <button
-                className={tab === "edit" ? "on" : ""}
-                onClick={() => {
-                  setTab("edit");
-                  setDraft([]);
-                }}
-              >
-                Edit map
-              </button>
-            </nav>
-          )}
-        </header>
-
-        {!data ? (
-          <p className="muted">Loading campus paths…</p>
-        ) : tab === "go" ? (
-          <>
-            <section className="panel">
-              <div className="modes" role="radiogroup" aria-label="How are you getting there?">
-                {(Object.keys(MODES) as ModeId[]).map((id) => (
-                  <button
-                    key={id}
-                    role="radio"
-                    aria-checked={mode === id}
-                    className={mode === id ? "on" : ""}
-                    disabled={(id === "bus" && !!busUnavailable) || (id === "accessible" && !!noStairsUnavailable)}
-                    title={(id === "bus" && busUnavailable) || (id === "accessible" && noStairsUnavailable) || undefined}
-                    onClick={() => setMode(id)}
-                  >
-                    <span aria-hidden>{MODE_ICONS[id]}</span>
-                    {MODES[id].label}
-                  </button>
-                ))}
-              </div>
-              <BuildingSearch
-                label="From"
-                placeholder="Search, or click the map"
-                buildings={data.buildings}
-                value={from}
-                active={clickTarget === "from"}
-                onFocus={() => setClickTarget("from")}
-                onSelect={(e) => {
-                  setFrom(e);
-                  if (e) setClickTarget("to");
-                }}
-              />
-              <div className="form-row tight">
-                <button onClick={locate} disabled={locating}>
-                  {locating ? "Locating…" : "◎ Use my location"}
-                </button>
-                <button
-                  onClick={() => {
-                    setFromRaw(to);
-                    setToRaw(from);
-                  }}
-                  disabled={!from && !to}
-                  aria-label="Swap start and destination"
-                >
-                  ⇅ Swap
-                </button>
-              </div>
-              <BuildingSearch
-                label="To"
-                placeholder="Building, code or room (e.g. CENTR 115)"
-                buildings={data.buildings}
-                value={to}
-                active={clickTarget === "to"}
-                onFocus={() => setClickTarget("to")}
-                onSelect={setTo}
-              />
-
-              {arriveBy && (
-                <p className="muted small">
-                  Arriving by {formatTime(arriveBy.at)} for {arriveBy.label}{" "}
-                  <button className="link" onClick={() => setArriveBy(null)}>
-                    Leave now instead
-                  </button>
-                </p>
-              )}
-              {hint && <p className="hint">{hint}</p>}
-              {mode === "bus" && busUnavailable && (
-                <p className="hint">No realistic shuttle for this trip: {busUnavailable.toLowerCase()} Showing the walk.</p>
-              )}
-              {mode === "accessible" && noStairsUnavailable && (
-                <p className="hint">There's no step-free route to this destination. Showing the route with stairs.</p>
-              )}
-              {plan && !plan.ok && !busSuggestion && <p className="hint">{plan.error}</p>}
-              {busSuggestion && (
-                <div className="suggest">
-                  <span>
-                    {busSuggestion.savedMeters === null
-                      ? "Only reachable by shuttle from here."
-                      : `Walk ${formatDistance(busSuggestion.route.meters)} instead of ${formatDistance(busSuggestion.route.meters + busSuggestion.savedMeters)} by shuttle`}{" "}
-                    ({busName(busSuggestion.route)}, arrive {formatTime(busSuggestion.route.arriveAt)})
-                  </span>
-                  <button className="primary" onClick={() => setMode("bus")}>
-                    Take the bus
-                  </button>
-                </div>
-              )}
-              {route && to && <Itinerary route={route} destination={endpointLabel(to)} showLeave={!!arriveBy} />}
-            </section>
-
-            <SchedulePanel data={data} schedule={schedule} estimate={estimateClass} onDirections={onDirections} />
-          </>
-        ) : (
-          <EditPanel
-            tool={tool}
-            onTool={(t) => {
-              setTool(t);
-              setDraft([]);
-            }}
-            draftLength={draft.length}
-            customPaths={customPaths}
-            selectedId={selectedId}
-            busy={busy}
-            status={status}
-            onUndo={() => setDraft((d) => d.slice(0, -1))}
-            onCancelDraft={() => setDraft([])}
-            onFinishLine={() =>
-              saveCustom({
-                ...customPaths,
-                features: [
-                  ...customPaths.features,
-                  {
-                    type: "Feature",
-                    properties: { id: crypto.randomUUID(), kind: tool === "steps" ? "steps" : "path" },
-                    geometry: { type: "LineString", coordinates: draft },
-                  },
-                ],
-              })
-            }
-            onAddBuilding={(name, aliases) =>
-              saveCustom({
-                ...customPaths,
-                features: [
-                  ...customPaths.features,
-                  {
-                    type: "Feature",
-                    properties: { id: crypto.randomUUID(), name, aliases },
-                    geometry: { type: "Point", coordinates: draft[0] },
-                  },
-                ],
-              })
-            }
-            onSelect={setSelectedId}
-            onDelete={(id) =>
-              saveCustom({ ...customPaths, features: customPaths.features.filter((f) => f.properties?.id !== id) })
-            }
-          />
-        )}
-
-        <section className="panel layers">
-          <label>
-            <input type="checkbox" checked={showSatellite} onChange={(e) => setShowSatellite(e.target.checked)} />
-            Satellite
-          </label>
-          <label>
-            <input type="checkbox" checked={showNetwork} onChange={(e) => setShowNetwork(e.target.checked)} />
-            Path network
-          </label>
-          {showNetwork && (
-            <div className="legend">
-              <span style={{ ["--c" as string]: KIND_COLORS[0] }}>path</span>
-              <span style={{ ["--c" as string]: KIND_COLORS[1] }}>stairs</span>
-              <span style={{ ["--c" as string]: KIND_COLORS[2] }}>bike path</span>
-              <span style={{ ["--c" as string]: KIND_COLORS[6] }}>shared path</span>
-              <span style={{ ["--c" as string]: KIND_COLORS[4] }}>connector road</span>
-              {mode === "bike" && <span style={{ ["--c" as string]: KIND_COLORS[5] }}>road (bikes)</span>}
-              <span style={{ ["--c" as string]: KIND_COLORS[3] }}>yours</span>
-            </div>
-          )}
-        </section>
-        <footer className="muted small">
-          Paths © OpenStreetMap contributors (ODbL). Shuttle times from UC San Diego Triton Transit; check live
-          arrivals before relying on them. Not an official UC San Diego app.
-        </footer>
-      </aside>
-
       {data && (
         <MapView
           graph={data.graph}
@@ -475,6 +311,224 @@ export function App() {
           onLocate={setMyLocation}
         />
       )}
+
+      <div className="map-tools">
+        <button className={`map-chip ${showSatellite ? "on" : ""}`} aria-pressed={showSatellite} onClick={() => setShowSatellite((v) => !v)}>
+          <SatelliteIcon /> Satellite
+        </button>
+        <button className={`map-chip ${showNetwork ? "on" : ""}`} aria-pressed={showNetwork} onClick={() => setShowNetwork((v) => !v)}>
+          <PathsIcon /> Paths
+        </button>
+        {showNetwork && (
+          <div className="legend">
+            <span style={{ ["--c" as string]: KIND_COLORS[0] }}>Path</span>
+            <span style={{ ["--c" as string]: KIND_COLORS[1] }}>Stairs</span>
+            <span style={{ ["--c" as string]: KIND_COLORS[2] }}>Bike path</span>
+            <span style={{ ["--c" as string]: KIND_COLORS[6] }}>Shared path</span>
+            <span style={{ ["--c" as string]: KIND_COLORS[4] }}>Connector road</span>
+            {mode === "bike" && <span style={{ ["--c" as string]: KIND_COLORS[5] }}>Road (bikes)</span>}
+            <span style={{ ["--c" as string]: KIND_COLORS[3] }}>Hand-mapped</span>
+          </div>
+        )}
+      </div>
+
+      <aside className={`sheet ${sheetOpen ? "open" : ""}`} aria-label="Directions and schedule">
+        <button className="sheet-handle" aria-label={sheetOpen ? "Collapse panel" : "Expand panel"} onClick={() => setSheetOpen((v) => !v)}>
+          <span />
+          <ChevronIcon up={!sheetOpen} />
+        </button>
+        <header className="sheet-head">
+          <h1>Campus Nav</h1>
+          <nav className="tabs" aria-label="Sections">
+            <button className={tab === "go" ? "on" : ""} aria-current={tab === "go"} onClick={() => setTab("go")}>
+              Directions
+            </button>
+            <button className={tab === "schedule" ? "on" : ""} aria-current={tab === "schedule"} onClick={() => setTab("schedule")}>
+              Schedule{schedule.meetings.length > 0 && <span className="count">{new Set(schedule.meetings.map((m) => m.course)).size}</span>}
+            </button>
+            {import.meta.env.DEV && (
+              <button
+                className={tab === "edit" ? "on" : ""}
+                aria-current={tab === "edit"}
+                onClick={() => {
+                  setTab("edit");
+                  setDraft([]);
+                }}
+              >
+                Edit map
+              </button>
+            )}
+          </nav>
+        </header>
+
+        <div className="sheet-body">
+          {!data ? (
+            <p className="muted">Loading campus paths…</p>
+          ) : tab === "go" ? (
+            <>
+              <NextUp data={data} meetings={schedule.meetings} estimate={estimateClass} onDirections={onDirections} />
+
+              <div className="trip">
+                <div className="trip-rail" aria-hidden>
+                  <span className="dot start" />
+                  <span className="line" />
+                  <span className="dot end" />
+                </div>
+                <div className="trip-fields">
+                  <BuildingSearch
+                    label="From"
+                    hideLabel
+                    placeholder="Start: search or tap the map"
+                    buildings={data.buildings}
+                    value={from}
+                    active={clickTarget === "from"}
+                    onFocus={() => setClickTarget("from")}
+                    onSelect={(e) => {
+                      setFrom(e);
+                      if (e) setClickTarget("to");
+                    }}
+                  />
+                  <BuildingSearch
+                    label="To"
+                    hideLabel
+                    placeholder="Destination: building or room (CENTR 115)"
+                    buildings={data.buildings}
+                    value={to}
+                    active={clickTarget === "to"}
+                    onFocus={() => setClickTarget("to")}
+                    onSelect={setTo}
+                  />
+                </div>
+                <div className="trip-actions">
+                  <button className="icon-btn" onClick={locate} disabled={locating} aria-label="Start from my location" title="Start from my location">
+                    <LocateIcon />
+                  </button>
+                  <button
+                    className="icon-btn"
+                    onClick={() => {
+                      setFromRaw(to);
+                      setToRaw(from);
+                    }}
+                    disabled={!from && !to}
+                    aria-label="Swap start and destination"
+                    title="Swap"
+                  >
+                    <SwapIcon />
+                  </button>
+                </div>
+              </div>
+
+              <div className="modes" role="radiogroup" aria-label="How are you getting there?">
+                {(Object.keys(MODES) as ModeId[]).map((id) => {
+                  const Icon = MODE_ICONS[id];
+                  const option = options[id];
+                  const eta = option.unavailable || !option.plan?.ok ? null : Math.max(1, Math.ceil(option.plan.route.minutes));
+                  return (
+                    <button
+                      key={id}
+                      role="radio"
+                      aria-checked={mode === id}
+                      className={mode === id ? "on" : ""}
+                      disabled={!!option.unavailable}
+                      title={option.unavailable ?? undefined}
+                      onClick={() => setMode(id)}
+                    >
+                      <Icon />
+                      <span className="mode-label">{MODES[id].label}</span>
+                      {from && to && <span className="mode-eta">{eta === null ? "—" : `${eta} min`}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {arriveBy && (
+                <p className="note">
+                  Arriving by <strong>{formatTime(arriveBy.at)}</strong> for {arriveBy.label}.{" "}
+                  <button className="link" onClick={() => setArriveBy(null)}>
+                    Leave now instead
+                  </button>
+                </p>
+              )}
+              {hint && <p className="note warn-note">{hint}</p>}
+              {mode === "bus" && busUnavailable && (
+                <p className="note warn-note">No realistic shuttle for this trip: {busUnavailable.toLowerCase()} Showing the walk.</p>
+              )}
+              {mode === "accessible" && noStairsUnavailable && (
+                <p className="note warn-note">There's no step-free route to this destination. Showing the route with stairs.</p>
+              )}
+              {plan && !plan.ok && !busSuggestion && <p className="note warn-note">{plan.error}</p>}
+              {busSuggestion && (
+                <div className="suggest">
+                  <BusIcon />
+                  <span>
+                    {busSuggestion.savedMeters === null
+                      ? "Only reachable by shuttle from here."
+                      : `Walk ${formatDistance(busSuggestion.route.meters)} instead of ${formatDistance(busSuggestion.route.meters + busSuggestion.savedMeters)}`}
+                    <span className="muted"> · {busName(busSuggestion.route)}</span>
+                  </span>
+                  <button onClick={() => setMode("bus")}>Take it</button>
+                </div>
+              )}
+              {route && to && <Itinerary route={route} destination={endpointLabel(to)} showLeave={!!arriveBy} />}
+              {!from && !to && (
+                <p className="muted small empty-hint">Pick a start and a destination, or add your classes in Schedule.</p>
+              )}
+            </>
+          ) : tab === "schedule" ? (
+            <SchedulePanel data={data} schedule={schedule} onDirections={onDirections} />
+          ) : (
+            <EditPanel
+              tool={tool}
+              onTool={(t) => {
+                setTool(t);
+                setDraft([]);
+              }}
+              draftLength={draft.length}
+              customPaths={customPaths}
+              selectedId={selectedId}
+              busy={busy}
+              status={status}
+              onUndo={() => setDraft((d) => d.slice(0, -1))}
+              onCancelDraft={() => setDraft([])}
+              onFinishLine={() =>
+                saveCustom({
+                  ...customPaths,
+                  features: [
+                    ...customPaths.features,
+                    {
+                      type: "Feature",
+                      properties: { id: crypto.randomUUID(), kind: tool === "steps" ? "steps" : "path" },
+                      geometry: { type: "LineString", coordinates: draft },
+                    },
+                  ],
+                })
+              }
+              onAddBuilding={(name, aliases) =>
+                saveCustom({
+                  ...customPaths,
+                  features: [
+                    ...customPaths.features,
+                    {
+                      type: "Feature",
+                      properties: { id: crypto.randomUUID(), name, aliases },
+                      geometry: { type: "Point", coordinates: draft[0] },
+                    },
+                  ],
+                })
+              }
+              onSelect={setSelectedId}
+              onDelete={(id) =>
+                saveCustom({ ...customPaths, features: customPaths.features.filter((f) => f.properties?.id !== id) })
+              }
+            />
+          )}
+        </div>
+
+        <footer className="sheet-foot">
+          Paths © OpenStreetMap contributors · Shuttle times from Triton Transit (scheduled, not live) · Not an official UC
+          San Diego app
+        </footer>
+      </aside>
     </div>
   );
 }

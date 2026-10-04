@@ -1,5 +1,6 @@
 import { endpointLabel, parseRoom, searchBuildings, type Building, type Endpoint } from "@campus/core";
 import { useId, useMemo, useState } from "react";
+import { CloseIcon } from "./Icons.tsx";
 
 interface Props {
   label: string;
@@ -9,10 +10,12 @@ interface Props {
   active?: boolean;
   onSelect: (e: Endpoint | null) => void;
   onFocus?: () => void;
+  /** Keep the label for screen readers only (the From/To fields show it visually instead). */
+  hideLabel?: boolean;
 }
 
 /** Building autocomplete. Accepts names, codes ("CENTR"), and code + room ("WLH 2001"). */
-export function BuildingSearch({ label, value, buildings, placeholder, active, onSelect, onFocus }: Props) {
+export function BuildingSearch({ label, value, buildings, placeholder, active, onSelect, onFocus, hideLabel }: Props) {
   const id = useId();
   const [query, setQuery] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
@@ -26,7 +29,9 @@ export function BuildingSearch({ label, value, buildings, placeholder, active, o
 
   return (
     <div className={`search ${active ? "active" : ""}`}>
-      <label htmlFor={id}>{label}</label>
+      <label htmlFor={id} className={hideLabel ? "sr-only" : undefined}>
+        {label}
+      </label>
       <div className="search-row">
         <input
           id={id}
@@ -53,7 +58,7 @@ export function BuildingSearch({ label, value, buildings, placeholder, active, o
         />
         {value && (
           <button className="icon-btn" aria-label={`Clear ${label}`} onClick={() => onSelect(null)}>
-            ×
+            <CloseIcon />
           </button>
         )}
       </div>

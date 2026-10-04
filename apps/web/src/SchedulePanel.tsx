@@ -20,8 +20,6 @@ import type { Schedule } from "./useSchedule.ts";
 interface Props {
   data: CampusData;
   schedule: Schedule;
-  /** Route that gets you to a building by a time (null when there's no start yet). */
-  estimate: (buildingId: string, startsAt: Date) => Route | null;
   onDirections: (meeting: ClassMeeting) => void;
 }
 
@@ -30,8 +28,56 @@ const COURSE_COLORS = ["#3b82f6", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#
 
 type Adding = null | "course" | "custom";
 
-/** The student's class schedule: what's next, plus an editor (list or week grid). */
-export function SchedulePanel({ data, schedule, estimate, onDirections }: Props) {
+/** Color for a course, stable for a given schedule. */
+export function courseColor(meetings: ClassMeeting[], course: string): string {
+  const courses = [...new Set(meetings.map((m) => m.course))].sort();
+  return COURSE_COLORS[Math.max(0, courses.indexOf(course)) % COURSE_COLORS.length];
+}
+
+/** The next class to get to, with when to leave and a Directions button. */
+export function NextUp({
+  data,
+  meetings,
+  estimate,
+  onDirections,
+}: {
+  data: CampusData;
+  meetings: ClassMeeting[];
+  estimate: (buildingId: string, startsAt: Date) => Route | null;
+  onDirections: (meeting: ClassMeeting) => void;
+}) {
+  // Only meetings with a place on the map are something to walk or ride to.
+  const next = nextClass(meetings.filter((m) => m.buildingId));
+  const nextKey = next ? `${next.meeting.id}@${next.startsAt.getTime()}` : "";
+  // Re-plan only when the class or the inputs to `estimate` change.
+  const trip = useMemo(() => (next ? estimate(next.meeting.buildingId, next.startsAt) : null), [nextKey, estimate]);
+  if (!next) return null;
+  const now = new Date();
+  const late = trip && trip.leaveAt < now;
+  return (
+    <button
+      className="next-up"
+      style={{ ["--course" as string]: courseColor(meetings, next.meeting.course) }}
+      onClick={() => onDirections(next.meeting)}
+    >
+      <span className="next-up-label">Next class</span>
+      <span className="next-up-title">
+        {next.meeting.course} <span className="muted">{typeLabel(next.meeting.type)}</span>
+      </span>
+      <span className="next-up-meta">
+        {formatWhen(next.startsAt, now)} · {placeLabel(next.meeting, data)}
+      </span>
+      <span className={`next-up-leave ${late ? "late" : ""}`}>
+        {trip
+          ? `${late ? "Leave now" : `Leave by ${formatClock(trip.leaveAt)}`} · ${Math.ceil(trip.minutes)} min`
+          : "Set a start to see when to leave"}
+      </span>
+    </button>
+  );
+}
+
+/** The student's class schedule editor (list or week grid). */
+export function SchedulePanel({ data, schedule, onDirections }: Props) {
   const { meetings } = schedule;
   const [adding, setAdding] = useState<Adding>(null);
   const [view, setView] = useState<"list" | "week">("list");
@@ -40,17 +86,8 @@ export function SchedulePanel({ data, schedule, estimate, onDirections }: Props)
   const fileInput = useRef<HTMLInputElement>(null);
 
   const courses = useMemo(() => [...new Set(meetings.map((m) => m.course))].sort(), [meetings]);
-  const colorOf = (course: string) => COURSE_COLORS[courses.indexOf(course) % COURSE_COLORS.length];
+  const colorOf = (course: string) => courseColor(meetings, course);
 
-  // Only meetings with a place on the map are something to walk/ride to.
-  const next = nextClass(meetings.filter((m) => m.buildingId));
-  const nextKey = next ? `${next.meeting.id}@${next.startsAt.getTime()}` : "";
-  const trip = useMemo(
-    () => (next ? estimate(next.meeting.buildingId, next.startsAt) : null),
-    // Re-plan only when the class or the inputs to `estimate` change.
-    [nextKey, estimate],
-  );
-  const now = new Date();
 
   return (
     <section className="panel">
@@ -66,29 +103,6 @@ export function SchedulePanel({ data, schedule, estimate, onDirections }: Props)
           ))}
         </div>
       </div>
-
-      {next && (
-        <div className="next-class" style={{ ["--course" as string]: colorOf(next.meeting.course) }}>
-          <div>
-            <strong>
-              {next.meeting.course} {typeLabel(next.meeting.type)}
-            </strong>{" "}
-            · {formatWhen(next.startsAt, now)}
-            <div className="muted">{placeLabel(next.meeting, data)}</div>
-            {trip ? (
-              <div className={trip.leaveAt < now ? "late" : "muted"}>
-                {trip.leaveAt < now ? "Leave now" : `Leave by ${formatClock(trip.leaveAt)}`} · {Math.ceil(trip.minutes)} min
-                {trip.usesTransit ? " by shuttle" : trip.legs[0]?.mode === "bike" ? " by bike" : " walk"}
-              </div>
-            ) : (
-              <div className="muted small">Set a start (or use your location) to see when to leave.</div>
-            )}
-          </div>
-          <button className="primary" onClick={() => onDirections(next.meeting)}>
-            Directions
-          </button>
-        </div>
-      )}
 
       {meetings.length === 0 && !adding && (
         <p className="muted small">

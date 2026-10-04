@@ -98,7 +98,7 @@ export function MapView(props: MapViewProps) {
     });
     map.addControl(geolocate, "top-right");
     geolocate.on("geolocate", (pos) => callbacks.current.onLocate([pos.coords.longitude, pos.coords.latitude]));
-    map.addControl(new ScaleControl({ unit: "imperial" }), "bottom-left");
+    map.addControl(new ScaleControl({ unit: "imperial" }), "bottom-right");
 
     markers.current = {
       from: new Marker({ color: "#27ae60" }),
@@ -323,7 +323,7 @@ export function MapView(props: MapViewProps) {
       const bounds = new LngLatBounds(all[0], all[0]);
       const pins = [callbacks.current.from, callbacks.current.to].filter((p): p is LngLat => !!p);
       for (const p of [...all, ...props.connectors.flat(), ...pins]) bounds.extend(p);
-      map.fitBounds(bounds, { padding: 80, maxZoom: 18, duration: 600 });
+      map.fitBounds(bounds, { padding: fitPadding(), maxZoom: 18, duration: 600 });
     }
   }, [ready, props.routeLines, props.connectors]);
 
@@ -346,6 +346,12 @@ export function MapView(props: MapViewProps) {
   }, [props.editing]);
 
   return <div ref={container} className="map" />;
+}
+
+/** Room around a fitted route so it isn't hidden under the panel (desktop) or sheet (phone). */
+function fitPadding() {
+  if (window.innerWidth > 760) return { top: 60, right: 70, bottom: 60, left: 440 };
+  return { top: 70, right: 40, bottom: Math.round(window.innerHeight * 0.5), left: 40 };
 }
 
 function source(map: MlMap, id: string): GeoJSONSource {
