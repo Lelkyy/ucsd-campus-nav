@@ -9,10 +9,41 @@ the way, using the paths, stairs and bike paths students actually use.
 
 > Not an official UC San Diego project.
 
+## What it does
+
+- **Four ways to get there:** Walk, No stairs (step-free), Bike (bike paths
+  first, roads where needed, walking your bike only where riding isn't allowed),
+  and Bus (Triton Transit shuttles on their real timetable). Walking routes
+  suggest the bus when it's clearly faster.
+- **Your schedule:** add courses from the Fall 2026 schedule by picking a
+  section; lectures, discussions, labs, midterms and the final come with it.
+  Edit anything, add your own events, see a week view, export/import a backup.
+  Saved in your browser.
+- **Leave-by times:** for your next class, in whichever mode you picked.
+- **Every classroom:** 556 rooms across 84 building codes are mapped to
+  buildings; the few that aren't are listed with the reason.
+- **Map editor** (local dev only): trace missing paths and buildings from
+  satellite imagery.
+
+## Run it
+
+Requires Node 20+.
+
+```bash
+npm install
+npm run dev          # http://localhost:5173
+```
+
+The campus map data is checked in, so this works straight away. Course
+sections need the private schedule file (see
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#course-sections-private)); without
+it you add classes by hand.
+
 ## Working on it
 
 Work is split into tickets. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
 starting: it covers how to claim a ticket, make a branch, and open a pull
-request.
+request. How the code and data fit together is in
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 Questions or ideas for new tickets: message Leonid (LE) on Instagram or in person.

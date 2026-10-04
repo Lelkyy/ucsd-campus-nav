@@ -1,0 +1,26 @@
+{
+  "name": "ucsd-campus-nav",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @campus/web",
+    "build": "npm run build -w @campus/web",
+    "build:graph": "tsx scripts/build-graph.ts",
+    "fetch:osm": "tsx scripts/build-graph.ts --refresh",
+    "fetch:rooms": "tsx scripts/fetch-rooms.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p packages/core && tsc -p packages/core/tsconfig.test.json && tsc -p apps/web && tsc -p scripts"
+  },
+  "devDependencies": {
+    "@types/geojson": "^7946.0.16",
+    "@types/node": "^26.6.4",
+    "fflate": "^0.8.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
