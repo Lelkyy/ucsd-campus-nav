@@ -86,9 +86,8 @@ export const MODES = {
   walk: { label: "Walk", profile: PROFILES.walk, transit: false, walkWeight: 1 },
   accessible: { label: "No stairs", profile: PROFILES.accessible, transit: false, walkWeight: 1 },
   bike: { label: "Bike", profile: PROFILES.bike, transit: false, walkWeight: 1 },
-  // Transit (shuttles, MTS buses, the trolley) is for people who'd rather not walk:
-  // it minimises walking, not total time.
-  bus: { label: "Transit", profile: PROFILES.walk, transit: true, walkWeight: 10 },
+  // Transit (shuttles, MTS buses, the trolley): the fastest trip, used only when it beats walking.
+  bus: { label: "Transit", profile: PROFILES.walk, transit: true, walkWeight: 1 },
 } as const;
 
 export type ModeId = keyof typeof MODES;
@@ -430,7 +429,7 @@ export function findRouteArriveBy(
   }
   if (!best) return walking;
   if (!best.usesTransit) best = walking ?? best;
-  // Minimising walking: the search already chose the bus over walking on purpose.
+  // When walking more is deliberately penalised, keep the transit route the search chose.
   if ((opts.walkWeight ?? 1) > 1) return best;
   // Fastest trip: prefer whichever lets you leave later.
   return walking && walking.leaveAt >= best.leaveAt ? walking : best;

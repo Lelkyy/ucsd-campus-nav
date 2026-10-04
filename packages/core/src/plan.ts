@@ -99,56 +99,36 @@ function endpointNodes(
 
 /** When a transit trip is worth offering instead of walking. */
 export const BUS_RULES = {
-  /** Must save at least this much walking… */
-  minWalkSavedMeters: 250,
-  /** …and at least this share of the walk. */
-  minWalkSavedShare: 0.3,
-  /** And can't take more than this much longer than walking. */
-  maxExtraMinutes: 20,
+  /** Transit must beat walking by at least this much (avoids "1 min faster" noise from waiting). */
+  minMinutesFaster: 1,
 };
 
 export type BusCheck = { ok: true } | { ok: false; reason: string };
 
 /**
- * Is `bus` (a route planned with shuttles allowed) a realistic alternative to
- * `walk` (the walking-only route for the same trip and time)?
+ * Use transit only if it's faster than walking: leaving now, it gets you there
+ * sooner; arriving by a time, it lets you leave later. Otherwise walk.
  */
 export function checkBusRoute(bus: Route | null, walk: Route | null, arriveBy?: Date): BusCheck {
-  if (!bus || !bus.usesTransit) return { ok: false, reason: "No shuttle, bus or trolley helps on this trip right now." };
+  if (!bus) return { ok: false, reason: "No shuttle, bus or trolley helps on this trip right now." };
+  // The fastest route with transit allowed doesn't use any: walking wins.
+  if (!bus.usesTransit) return { ok: false, reason: "Walking is faster for this trip." };
   if (!walk) return { ok: true };
-  const saved = walk.meters - bus.meters;
-  if (saved < BUS_RULES.minWalkSavedMeters || saved < walk.meters * BUS_RULES.minWalkSavedShare) {
-    return { ok: false, reason: "Transit would barely save any walking on this trip." };
-  }
-  // Arriving by a time: how much earlier you'd have to leave. Leaving now: how much later you'd get there.
-  const extra = arriveBy
-    ? (walk.leaveAt.getTime() - bus.leaveAt.getTime()) / 60_000
-    : (bus.arriveAt.getTime() - walk.arriveAt.getTime()) / 60_000;
-  if (extra > BUS_RULES.maxExtraMinutes) {
-    return { ok: false, reason: `Transit would take ${Math.round(extra)} min longer than walking.` };
-  }
+  const faster = arriveBy
+    ? (bus.leaveAt.getTime() - walk.leaveAt.getTime()) / 60_000
+    : (walk.arriveAt.getTime() - bus.arriveAt.getTime()) / 60_000;
+  if (faster < BUS_RULES.minMinutesFaster) return { ok: false, reason: "Walking is faster for this trip." };
   return { ok: true };
 }
 
-/**
- * The transit option for a trip: the least-walking route that's still
- * realistic. If the walk-minimising route takes too long (e.g. a long loop
- * shuttle), fall back to routes that weigh time more (e.g. a 2-minute trolley ride).
- */
+/** The transit option for a trip: the fastest route, used only if it beats walking. */
 export function planTransit(
   graph: CampusGraph,
   from: Endpoint,
   to: Endpoint,
   opts: Omit<PlanOptions, "walkWeight">,
   walk: Route | null,
-  walkWeights: number[] = [10, 4, 1.5],
 ): { plan: Plan; check: BusCheck } {
-  let first: { plan: Plan; check: BusCheck } | null = null;
-  for (const walkWeight of walkWeights) {
-    const plan = planRoute(graph, from, to, { ...opts, walkWeight });
-    const check = checkBusRoute(plan.ok ? plan.route : null, walk, opts.arriveBy);
-    first ??= { plan, check };
-    if (check.ok) return { plan, check };
-  }
-  return first!;
+  const plan = planRoute(graph, from, to, { ...opts, walkWeight: 1 });
+  return { plan, check: checkBusRoute(plan.ok ? plan.route : null, walk, opts.arriveBy) };
 }

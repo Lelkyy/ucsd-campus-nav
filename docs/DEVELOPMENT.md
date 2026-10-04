@@ -146,10 +146,11 @@ Transit mode routes on two GTFS timetables (the `FEEDS` list in
   so the build keeps only stops in our area and the trips through them (the
   Blue Line, buses 30, 41, 201/202, 237, 921, 985).
 
-Routing minimises walking (a minute of walking counts as ten riding or
-waiting). If that route isn't realistic (it must save 250 m and 30% of the walk
-and take at most 20 min longer than walking), the planner falls back to routes
-that weigh time more before giving up.
+Transit is planned as the fastest trip and only used when it beats walking:
+leaving now, it must arrive at least 1 minute sooner; arriving by a class time,
+it must let you leave later (`checkBusRoute` in `plan.ts`). Otherwise the app
+walks, and the Transit button says "Walking is faster". While walking, the app
+suggests transit when it saves 3+ minutes.
 
 **Fares** come from `data/fares.json`, because the MTS feed's fare tables lag
 behind fare changes. A one-way MTS fare ($3 since Oct 1, 2026) covers transfers

@@ -220,13 +220,20 @@ describe("bus mode: minimise walking", () => {
     expect(r.meters).toBeLessThan(10);
   });
 
-  it("counts a bus that saves the walk as realistic, and one that doesn't as not", () => {
-    const busR = findRoute(g, 0, [1], { transit, departAt: at(10), walkWeight: 10 })!;
+  it("only counts transit when it's faster than walking", () => {
+    // Leaving at 10:00: walking (~14 min) beats waiting for the 10:15 bus.
+    const early = findRoute(g, 0, [1], { transit, departAt: at(10), walkWeight: 10 })!;
+    expect(checkBusRoute(early, findRoute(g, 0, [1], { departAt: at(10) }))).toEqual({
+      ok: false,
+      reason: "Walking is faster for this trip.",
+    });
+    // Leaving at 10:13: the 10:15 bus arrives 10:20, walking arrives ~10:27.
+    const late = findRoute(g, 0, [1], { transit, departAt: at(10, 13) })!;
+    expect(late.usesTransit).toBe(true);
+    expect(checkBusRoute(late, findRoute(g, 0, [1], { departAt: at(10, 13) })).ok).toBe(true);
+    // No transit in the route at all.
     const walkR = findRoute(g, 0, [1], { departAt: at(10) })!;
-    expect(checkBusRoute(busR, walkR).ok).toBe(true);
     expect(checkBusRoute(walkR, walkR).ok).toBe(false);
-    const late = findRoute(g, 0, [1], { transit, departAt: at(9), walkWeight: 10 })!; // waits 75 min
-    expect(checkBusRoute(late, findRoute(g, 0, [1], { departAt: at(9) })).ok).toBe(false);
   });
 
   it("merges a loop that continues as its next run into one ride", () => {

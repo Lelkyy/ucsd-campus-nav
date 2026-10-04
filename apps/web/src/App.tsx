@@ -42,6 +42,8 @@ import { useSavedPlaces } from "./useSavedPlaces.ts";
 import { NextUp, SchedulePanel } from "./SchedulePanel.tsx";
 import { useSchedule } from "./useSchedule.ts";
 
+/** Suggest transit while walking only when it saves at least this much time. */
+const SUGGEST_MIN_FASTER = 3;
 /** Aim to reach class this many minutes early. */
 const CLASS_BUFFER_MIN = 2;
 const BIKE_COLOR = "#16a34a";
@@ -175,12 +177,16 @@ export function App() {
   const route = plan?.ok ? plan.route : null;
 
   // Walking: point out a realistic shuttle that saves a good chunk of walking.
+  // Walking: point out transit when it's clearly faster (or the only way there).
   const busSuggestion = useMemo(() => {
     if ((mode !== "walk" && mode !== "accessible") || !bus?.check.ok || !bus.plan?.ok) return null;
     const busRoute = bus.plan.route;
-    const savedMeters = route ? route.meters - busRoute.meters : null;
-    return { route: busRoute, savedMeters };
-  }, [mode, bus, route]);
+    if (!route) return { route: busRoute, savedMin: null };
+    const saved = arriveBy
+      ? (busRoute.leaveAt.getTime() - route.leaveAt.getTime()) / 60_000
+      : (route.arriveAt.getTime() - busRoute.arriveAt.getTime()) / 60_000;
+    return saved >= SUGGEST_MIN_FASTER ? { route: busRoute, savedMin: Math.round(saved) } : null;
+  }, [mode, bus, route, arriveBy]);
 
   /** When to leave the current start for a class (null without a start or a route). */
   const estimateClass = useCallback(
@@ -488,9 +494,11 @@ export function App() {
                 <div className="suggest">
                   <BusIcon />
                   <span>
-                    {busSuggestion.savedMeters === null
-                      ? "Only reachable by shuttle from here."
-                      : `Walk ${formatDistance(busSuggestion.route.meters)} instead of ${formatDistance(busSuggestion.route.meters + busSuggestion.savedMeters)}`}
+                    {busSuggestion.savedMin === null
+                      ? "Only reachable by transit from here."
+                      : arriveBy
+                        ? `Transit lets you leave ${busSuggestion.savedMin} min later`
+                        : `Transit gets you there ${busSuggestion.savedMin} min sooner`}
                     <span className="muted"> · {busName(busSuggestion.route)}</span>
                   </span>
                   <button onClick={() => setMode("bus")}>Take it</button>
