@@ -2,18 +2,24 @@ import { distanceMeters } from "./geo.ts";
 import type { CampusGraph } from "./graph.ts";
 import { findRoute, findRouteArriveBy, type Profile, type Route } from "./route.ts";
 import type { TransitNetwork } from "./transit.ts";
-import type { Building, LngLat } from "./types.ts";
+import { entranceTargets } from "./indoor.ts";
+import { EdgeKind, type Building, type LngLat, type Place } from "./types.ts";
 
 export type Endpoint =
-  | { kind: "building"; building: Building; room?: string }
+  /** roomAt: where the room is, when it's mapped indoors (routes go to the nearest door). */
+  | { kind: "building"; building: Building; room?: string; roomAt?: LngLat }
+  | { kind: "place"; place: Place }
   | { kind: "point"; lngLat: LngLat; label: string };
 
 export function endpointPosition(e: Endpoint): LngLat {
-  return e.kind === "building" ? e.building.center : e.lngLat;
+  if (e.kind === "building") return e.building.center;
+  if (e.kind === "place") return e.place.points[0];
+  return e.lngLat;
 }
 
 export function endpointLabel(e: Endpoint): string {
   if (e.kind === "point") return e.label;
+  if (e.kind === "place") return e.place.name;
   return e.room ? `${e.building.name} ${e.room}` : e.building.name;
 }
 
@@ -42,11 +48,12 @@ export type Plan =
 export function planRoute(graph: CampusGraph, from: Endpoint, to: Endpoint, opts: PlanOptions): Plan {
   const connectors: [LngLat, LngLat][] = [];
   const accept = opts.profile.travel === "bike" ? graph.onBikeNetwork : graph.onWalkNetwork;
-  const targets = endpointNodes(graph, to, connectors, false, accept);
+  const stepFree = opts.profile.speed[EdgeKind.Steps] === 0;
+  const targets = endpointNodes(graph, to, connectors, false, accept, stepFree);
   if (targets.length === 0) return { ok: false, error: "Destination is too far from any mapped path." };
 
   // From a building, the router may leave through any of its exits and picks the best.
-  const start = endpointNodes(graph, from, connectors, true, accept);
+  const start = endpointNodes(graph, from, connectors, true, accept, stepFree);
   if (start.length === 0) return { ok: false, error: "Start is too far from any mapped path." };
 
   const route = opts.arriveBy
@@ -72,8 +79,15 @@ function endpointNodes(
   connectors: [LngLat, LngLat][],
   isStart: boolean,
   accept: (i: number) => boolean,
+  stepFree: boolean,
 ): number[] {
-  if (e.kind === "building") return e.building.targets;
+  if (e.kind === "building") {
+    return entranceTargets(e.building, (n) => graph.coord(n), { stepFree, roomAt: isStart ? undefined : e.roomAt });
+  }
+  if (e.kind === "place") {
+    const nodes = e.place.points.map((p) => graph.nearestNode(p, { maxMeters: 300, accept })).filter((n) => n !== -1);
+    return [...new Set(nodes)];
+  }
   const node = graph.nearestNode(e.lngLat, { maxMeters: 300, accept });
   if (node === -1) return [];
   const snapped = graph.coord(node);

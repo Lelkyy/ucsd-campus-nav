@@ -21,7 +21,10 @@ import {
   type GraphData,
   formatCourseCode,
   type CourseSections,
+  type Entrance,
+  type IndoorData,
   type LngLat,
+  type PlacesData,
   type SectionsData,
   type TransitData,
   type TransitPattern,
@@ -35,6 +38,7 @@ const CUSTOM_PATH = join(ROOT, "data/custom-paths.geojson");
 const BLOCKED_PATH = join(ROOT, "data/blocked-ways.json");
 const CODES_PATH = join(ROOT, "data/building-codes.json");
 const ROOMS_PATH = join(ROOT, "data/rooms.json");
+const PLACES_PATH = join(ROOT, "data/places.json");
 /** Current-term schedule exported from TSS (login-only, so kept out of git). */
 const PRIVATE_DIR = join(ROOT, "data/private");
 
@@ -105,8 +109,8 @@ interface RawBuilding {
   center: LngLat;
 }
 
-/** [from, to, kind, bikes allowed] */
-type Edge = [number, number, EdgeKind, boolean];
+/** [from, to, kind, bikes allowed, index into the path-name table or -1] */
+type Edge = [number, number, EdgeKind, boolean, number];
 
 const walkable = (kind: EdgeKind) => kind !== EdgeKind.BikeOnly;
 
@@ -134,12 +138,21 @@ async function main() {
   const osmIndex = new Map<number, number>();
   const edgeKeys = new Set<string>();
   let edges: Edge[] = [];
-  const addEdge = (a: number, b: number, kind: EdgeKind, bikeOk = true) => {
+  // Path/street names, for turn-by-turn directions ("Turn left onto Library Walk").
+  const names: string[] = [];
+  const nameIds = new Map<string, number>();
+  const nameId = (name?: string) => {
+    if (!name) return -1;
+    let id = nameIds.get(name);
+    if (id === undefined) nameIds.set(name, (id = names.push(name) - 1));
+    return id;
+  };
+  const addEdge = (a: number, b: number, kind: EdgeKind, bikeOk = true, name = -1) => {
     if (a === b) return;
     const key = a < b ? `${a}-${b}` : `${b}-${a}`;
     if (edgeKeys.has(key)) return;
     edgeKeys.add(key);
-    edges.push([a, b, kind, bikeOk]);
+    edges.push([a, b, kind, bikeOk, name]);
   };
   const osmNode = (id: number, lon: number, lat: number) => {
     let i = osmIndex.get(id);
@@ -163,7 +176,7 @@ async function main() {
     for (let k = 0; k + 1 < way.nodes.length; k++) {
       const a = osmNode(way.nodes[k], way.geometry[k].lon, way.geometry[k].lat);
       const b = osmNode(way.nodes[k + 1], way.geometry[k + 1].lon, way.geometry[k + 1].lat);
-      addEdge(a, b, kind, bikeOk);
+      addEdge(a, b, kind, bikeOk, nameId(way.tags.name));
     }
   }
 
@@ -217,7 +230,8 @@ async function main() {
   const entrancePts = entrances.map((e) => [e.lon, e.lat] as LngLat);
   const entranceIndex = new PointIndex(entrancePts);
   entrancePts.forEach((_, i) => entranceIndex.add(i));
-  const entranceNodesOf = (b: RawBuilding): number[] => {
+  /** Indices into `entrances` of the doors on a building's outline. */
+  const entrancesOf = (b: RawBuilding): number[] => {
     const found = new Set<number>();
     for (const line of b.lines) {
       for (const p of densify(line, 1)) {
@@ -225,8 +239,32 @@ async function main() {
         if (e !== -1) found.add(e);
       }
     }
-    return [...found].map((e) => osmIndex.get(entrances[e].id)).filter((i): i is number => i !== undefined);
+    return [...found];
   };
+  const entranceNodesOf = (b: RawBuilding): number[] =>
+    entrancesOf(b)
+      .map((e) => osmIndex.get(entrances[e].id))
+      .filter((i): i is number => i !== undefined);
+
+  // Elevators and indoor rooms, assigned to the building they're inside.
+  const elevatorPts = raw.elements
+    .filter((el): el is OsmNode => el.type === "node" && el.tags?.highway === "elevator")
+    .map((n) => [n.lon, n.lat] as LngLat);
+  const indoorRooms = raw.elements.flatMap((el) => {
+    if (el.tags?.indoor !== "room") return [];
+    const ref = el.tags.ref ?? el.tags.name;
+    if (!ref) return [];
+    const pts =
+      el.type === "node"
+        ? [[el.lon, el.lat] as LngLat]
+        : el.type === "way"
+          ? toLine(el.geometry)
+          : el.members.flatMap((m) => (m.geometry ? toLine(m.geometry) : []));
+    if (!pts.length) return [];
+    const center: LngLat = [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length];
+    return [{ ref, name: el.tags.ref ? el.tags.name : undefined, level: el.tags.level, center }];
+  });
+  const inBuilding = (b: RawBuilding, p: LngLat) => b.lines.some((ring) => ring.length > 3 && pointInRing(p, ring));
 
   /** Route targets for a building among nodes passing `accept`. */
   const targetsOf = (b: RawBuilding, accept: (i: number) => boolean) => {
@@ -283,7 +321,7 @@ async function main() {
   // Other roads stay for cycling only (unless bikes are banned on them).
   edges = edges.flatMap((e, i): Edge[] => {
     if (e[2] !== EdgeKind.Road || usedRoads.has(i)) return [e];
-    return e[3] ? [[e[0], e[1], EdgeKind.BikeOnly, true]] : [];
+    return e[3] ? [[e[0], e[1], EdgeKind.BikeOnly, true, e[4]]] : [];
   });
 
   // Drop walking pieces with no building, stop or hand-traced path on them, and
@@ -299,7 +337,7 @@ async function main() {
   for (const [a, b] of edges) remap[a] = remap[b] = 0;
   const finalCoords: LngLat[] = [];
   for (let i = 0; i < coords.length; i++) if (remap[i] === 0) remap[i] = finalCoords.push(coords[i]) - 1;
-  const finalEdges = edges.map(([a, b, k, bike]): Edge => [remap[a], remap[b], k, bike]);
+  const finalEdges = edges.map(([a, b, k, bike, nm]): Edge => [remap[a], remap[b], k, bike, nm]);
   // Walking connectivity ignores bike-only edges; riding connectivity uses everything.
   const comps = components(finalCoords.length, finalEdges.filter((e) => walkable(e[2])));
   const bikeComps = components(finalCoords.length, finalEdges);
@@ -317,6 +355,7 @@ async function main() {
 
   // --- Buildings.
   const buildings: Building[] = [];
+  const indoor: IndoorData = {};
   const unreachable: string[] = [];
   const onMain = (i: number) => kept(i) && comps.id[remap[i]] === mainComponent;
   const onServed = (i: number) => kept(i) && servedComps.has(comps.id[remap[i]]);
@@ -333,6 +372,24 @@ async function main() {
     const aliases = ["short_name", "alt_name", "abbr_name", "official_name", "old_name", "ref", "loc_name", "name:en"]
       .flatMap((k) => (b.tags[k] ? b.tags[k].split(";").map((s) => s.trim()) : []))
       .filter((a) => a && a !== b.name);
+    const doors: Entrance[] = entrancesOf(b).map((e) => {
+      const n = entrances[e];
+      const node = osmIndex.get(n.id);
+      const wheelchair = n.tags?.wheelchair;
+      return {
+        lngLat: [round(n.lon), round(n.lat)],
+        node: node !== undefined && kept(node) ? remap[node] : -1,
+        kind: n.tags?.entrance ?? "yes",
+        wheelchair: wheelchair === "yes" || wheelchair === "no" || wheelchair === "limited" ? wheelchair : undefined,
+        label: n.tags?.name ?? n.tags?.ref,
+      };
+    });
+    const elevators = elevatorPts.filter((p) => inBuilding(b, p)).length;
+    const levels = Number(b.tags["building:levels"]);
+    const rooms = indoorRooms.filter((r) => inBuilding(b, r.center));
+    if (rooms.length) {
+      indoor[b.id] = rooms.map((r) => ({ ...r, center: [round(r.center[0]), round(r.center[1])] as LngLat }));
+    }
     buildings.push({
       id: b.id,
       name: b.name,
@@ -341,6 +398,9 @@ async function main() {
       targets: finalTargets,
       entranceCount,
       access: walkable ? "walk" : "shuttle",
+      ...(doors.length ? { entrances: doors } : {}),
+      ...(Number.isFinite(levels) && levels > 0 ? { levels } : {}),
+      ...(elevators ? { elevators } : {}),
     });
   }
   for (const f of custom.features) {
@@ -423,11 +483,16 @@ async function main() {
     mainComponent,
     bikeComponents: Array.from(bikeComps.id),
     mainBikeComponent,
+    names,
+    edgeNames: finalEdges.map((e) => e[4]),
   };
   mkdirSync(OUT_DIR, { recursive: true });
   writeFileSync(join(OUT_DIR, "graph.json"), JSON.stringify(graph));
   writeFileSync(join(OUT_DIR, "buildings.json"), JSON.stringify(buildings));
   writeFileSync(join(OUT_DIR, "transit.json"), JSON.stringify(transit));
+  writeFileSync(join(OUT_DIR, "indoor.json"), JSON.stringify(indoor));
+  const places = buildPlaces(transit);
+  writeFileSync(join(OUT_DIR, "places.json"), JSON.stringify(places));
   if (sections) writeFileSync(join(OUT_DIR, "sections.json"), JSON.stringify(sections.data));
 
   const mainSize = comps.size[mainComponent];
@@ -444,6 +509,9 @@ async function main() {
       `campus buildings ${buildings.length}: ${count("walk")} on foot, ${count("shuttle")} shuttle-only, ` +
         `${buildings.filter((b) => b.entranceCount > 0).length} with mapped entrances (${offCampusCount} off-campus skipped)`,
       `shuttle: ${transit.routes.length} routes, ${transit.stops.length} stops, ${transit.patterns.reduce((sum, p) => sum + p.trips.length, 0)} trips`,
+      `doors: ${buildings.reduce((n, b) => n + (b.entrances?.length ?? 0), 0)} mapped on ${buildings.filter((b) => b.entrances).length} buildings; ` +
+        `elevators in ${buildings.filter((b) => b.elevators).length}; indoor rooms in ${Object.keys(indoor).length} (${Object.values(indoor).flat().length} rooms)`,
+      `places: ${places.places.filter((p) => p.kind === "lingo").length} student place names, ${places.places.filter((p) => p.kind === "stop").length} stops, ${Object.keys(places.tips).length} tips`,
       unreachable.length ? `UNREACHABLE campus buildings: ${unreachable.join(", ")}` : "every campus building is reachable",
       roomsData
         ? `schedule rooms (${roomsData.terms.join(", ")}): ${scheduleCodes.length} building codes, ${roomCount} rooms`
@@ -457,6 +525,44 @@ async function main() {
       .filter(Boolean)
       .join("\n"),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Student place names
+
+/**
+ * data/places.json: names students use for spots maps don't know. Each entry
+ * points at shuttle stops by name ("stops") or coordinates ("points"). Every
+ * shuttle stop is also searchable by its own name.
+ */
+function buildPlaces(transit: TransitData): PlacesData {
+  const file = existsSync(PLACES_PATH)
+    ? (JSON.parse(readFileSync(PLACES_PATH, "utf8")) as {
+        places: { name: string; aliases?: string[]; stops?: string[]; points?: LngLat[]; note?: string }[];
+        tips?: Record<string, string>;
+      })
+    : { places: [], tips: {} };
+  const out: PlacesData = { places: [], tips: file.tips ?? {} };
+  file.places.forEach((p, i) => {
+    const fromStops = (p.stops ?? []).map((name) => {
+      const stop = transit.stops.find((s) => s.name === name);
+      if (!stop) throw new Error(`data/places.json: "${p.name}" refers to unknown stop "${name}"`);
+      return stop.lngLat;
+    });
+    const points = [...fromStops, ...(p.points ?? [])];
+    if (!points.length) throw new Error(`data/places.json: "${p.name}" needs "stops" or "points"`);
+    out.places.push({ id: `p${i}`, name: p.name, aliases: p.aliases ?? [], points, kind: "lingo", note: p.note });
+  });
+  // Stops by their own name; both sides of the road ("(East)"/"(West)") become one place.
+  const byBase = new Map<string, LngLat[]>();
+  for (const s of transit.stops) {
+    const base = s.name.replace(/\s*\((North|South|East|West)\)$/, "");
+    (byBase.get(base) ?? byBase.set(base, []).get(base)!).push(s.lngLat);
+  }
+  for (const [name, points] of byBase) {
+    out.places.push({ id: `s${out.places.length}`, name, aliases: [], points, kind: "stop", note: "Shuttle stop" });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +613,8 @@ async function fetchOsm(): Promise<void> {
   way["building"]["name"](${bbox});
   relation["building"]["name"](${bbox});
   node["entrance"](${bbox});
+  node["highway"="elevator"](${bbox});
+  nwr["indoor"="room"](${bbox});
   way["amenity"="university"](${bbox});
   relation["amenity"="university"](${bbox});
 );

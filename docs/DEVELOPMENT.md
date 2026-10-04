@@ -64,6 +64,32 @@ put these files in `data/private/` and run `npm run build:graph`:
 Ask Leonid for the files. Don't commit them or the generated
 `apps/web/public/data/sections.json` until we've confirmed sharing is OK.
 
+## Directions, doors and floors
+
+- `instructions.ts` turns a route into steps. Turns are only announced at
+  junctions (3+ paths meet) or where the path name changes, using OSM names like
+  Library Walk. Stairs and "walk your bike" stretches over 25 m are called out.
+- `nav.ts` (`RouteTracker`) snaps GPS fixes to the route. Off the route by 35 m
+  twice in a row re-routes from where you are; within 15 m of the end is arrival.
+  In dev, **Simulate** walks the route without GPS.
+- `indoor.ts`: routes skip emergency exits, step-free routes prefer doors tagged
+  `wheelchair=yes`, and a room mapped indoors pulls the route to the nearest door.
+  Floors come from mapped rooms (`indoor=room` + `level`) when available,
+  otherwise from the room number (first digit; `B…` is basement), labelled as a guess.
+- Indoor data is thin: rooms are mapped in OSM for the CSE building and a couple
+  of residences, entrances on ~48 buildings. UCSD's official floor plans aren't
+  public. Mapping entrances (`entrance=main`, `wheelchair=yes`) and elevators in
+  OSM directly improves the app; good ticket material.
+
+## Student place names
+
+`data/places.json` holds names students use ("Revelle bus stop", "GTC"). Each
+entry points at shuttle stops by their exact timetable name and/or `[lon, lat]`
+points; a route goes to the closest. `tips` adds notes for a building code or
+`"CODE ROOM"`. People save their own names in the app, and "Suggest it for
+everyone" emails the name and location to add here. Every shuttle stop is also
+searchable by its own name.
+
 ## Building codes and classrooms
 
 `data/building-codes.json` maps schedule building codes (`WLH`, `PCYNH`, …) to

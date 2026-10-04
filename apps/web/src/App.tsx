@@ -1,6 +1,8 @@
 import {
   MODES,
+  buildSteps,
   checkBusRoute,
+  insideHints,
   endpointLabel,
   endpointPosition,
   nextOccurrence,
@@ -21,6 +23,7 @@ import {
   BikeIcon,
   BusIcon,
   ChevronIcon,
+  CloseIcon,
   LocateIcon,
   PathsIcon,
   SatelliteIcon,
@@ -28,7 +31,11 @@ import {
   SwapIcon,
   WalkIcon,
 } from "./Icons.tsx";
+import { InsideCard } from "./InsideCard.tsx";
+import { NavigationView } from "./NavigationView.tsx";
+import { PlaceNamer } from "./PlaceNamer.tsx";
 import { ReportPanel, type RouteContext } from "./ReportPanel.tsx";
+import { useSavedPlaces } from "./useSavedPlaces.ts";
 import { NextUp, SchedulePanel } from "./SchedulePanel.tsx";
 import { useSchedule } from "./useSchedule.ts";
 
@@ -44,6 +51,10 @@ export function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("go");
   const schedule = useSchedule();
+  const saved = useSavedPlaces();
+  /** Live turn-by-turn navigation, and your position while it's running. */
+  const [navigating, setNavigating] = useState(false);
+  const [userPos, setUserPos] = useState<LngLat | null>(null);
 
   const [from, setFromRaw] = useState<Endpoint | null>(null);
   const [to, setToRaw] = useState<Endpoint | null>(null);
@@ -73,8 +84,14 @@ export function App() {
     setArriveBy(null);
   };
   const setTo = (e: Endpoint | null) => {
-    setToRaw(e);
+    setToRaw(withRoom(e));
     setArriveBy(null);
+  };
+  /** Point a building destination at its room, when the room is mapped indoors. */
+  const withRoom = (e: Endpoint | null): Endpoint | null => {
+    if (e?.kind !== "building" || !e.room || !data) return e;
+    const room = data.indoor[e.building.id]?.find((r) => r.ref.toUpperCase() === e.room!.toUpperCase());
+    return room ? { ...e, roomAt: room.center } : e;
   };
 
   const reload = useCallback(async (bust: boolean) => {
@@ -180,6 +197,24 @@ export function App() {
     [data, from, myLocation, mode, planFor],
   );
 
+  const allPlaces = useMemo(() => [...saved.places, ...(data?.places.places ?? [])], [saved.places, data]);
+  const steps = useMemo(() => (data && route && to ? buildSteps(data.graph, route, endpointLabel(to)) : []), [data, route, to]);
+  const destBuilding = to?.kind === "building" ? to.building : null;
+  const inside = useMemo(
+    () => (data && destBuilding && route ? insideHints(destBuilding, to?.kind === "building" ? to.room : undefined, data.indoor[destBuilding.id], route) : null),
+    [data, destBuilding, to, route],
+  );
+  const tips = useMemo(() => {
+    if (!data || !destBuilding) return [];
+    const codes = destBuilding.aliases.filter((a) => /^[A-Z0-9-]{2,6}$/.test(a));
+    const room = to?.kind === "building" ? to.room : undefined;
+    return codes.flatMap((c) => [data.places.tips[c], room ? data.places.tips[`${c} ${room}`] : undefined]).filter((t): t is string => !!t);
+  }, [data, destBuilding, to]);
+  const insideCard =
+    destBuilding && inside ? (
+      <InsideCard buildingName={destBuilding.name} hints={inside} stepFree={mode === "accessible"} tips={tips} />
+    ) : null;
+
   const routeLines: RouteLine[] | null = route
     ? route.legs.map((l) => ({
         coordinates: l.coordinates,
@@ -224,7 +259,7 @@ export function App() {
     const building = data?.buildingById.get(meeting.buildingId);
     if (!building) return setHint("That class isn't at a building on the map.");
     setTab("go");
-    setToRaw({ kind: "building", building, room: meeting.room });
+    setToRaw(withRoom({ kind: "building", building, room: meeting.room }));
     if (myLocation) setFromRaw({ kind: "point", lngLat: myLocation, label: "My location" });
     else if (!from) {
       setClickTarget("from");
@@ -261,7 +296,7 @@ export function App() {
   if (loadError) return <div className="fatal">Couldn't load campus data. {loadError}</div>;
 
   return (
-    <div className="app">
+    <div className={`app ${navigating ? "navigating" : ""}`}>
       {data && (
         <MapView
           graph={data.graph}
@@ -276,6 +311,10 @@ export function App() {
           showSatellite={showSatellite}
           reportPin={tab === "report" ? reportPin : null}
           pickingSpot={tab === "report"}
+          userPos={navigating ? userPos : null}
+          follow={navigating}
+          doors={(destBuilding?.entrances ?? []).map((d) => ({ lngLat: d.lngLat, used: d === inside?.entrance }))}
+          room={inside?.roomAt && to?.kind === "building" ? { lngLat: inside.roomAt, label: `${to.room} · ${inside.floor?.label ?? ""}` } : null}
           onMapClick={onMapClick}
           onLocate={setMyLocation}
         />
@@ -308,7 +347,7 @@ export function App() {
         </button>
         <header className="sheet-head">
           <h1>Campus Nav</h1>
-          <nav className="tabs" aria-label="Sections">
+          <nav className="tabs" aria-label="Sections" hidden={navigating}>
             <button className={tab === "go" ? "on" : ""} aria-current={tab === "go"} onClick={() => setTab("go")}>
               Directions
             </button>
@@ -324,6 +363,22 @@ export function App() {
         <div className="sheet-body">
           {!data ? (
             <p className="muted">Loading campus paths…</p>
+          ) : navigating && route && to ? (
+            <NavigationView
+              route={route}
+              steps={steps}
+              destination={endpointLabel(to)}
+              arrival={insideCard}
+              onPosition={setUserPos}
+              onReroute={(p) => {
+                setFromRaw({ kind: "point", lngLat: p, label: "My location" });
+                setArriveBy(null);
+              }}
+              onEnd={() => {
+                setNavigating(false);
+                setUserPos(null);
+              }}
+            />
           ) : tab === "go" ? (
             <>
               <NextUp data={data} meetings={schedule.meetings} estimate={estimateClass} onDirections={onDirections} />
@@ -340,6 +395,7 @@ export function App() {
                     hideLabel
                     placeholder="Start: search or tap the map"
                     buildings={data.buildings}
+                    places={allPlaces}
                     value={from}
                     active={clickTarget === "from"}
                     onFocus={() => setClickTarget("from")}
@@ -351,8 +407,9 @@ export function App() {
                   <BuildingSearch
                     label="To"
                     hideLabel
-                    placeholder="Destination: building or room (CENTR 115)"
+                    placeholder="Destination: building, room or place"
                     buildings={data.buildings}
+                    places={allPlaces}
                     value={to}
                     active={clickTarget === "to"}
                     onFocus={() => setClickTarget("to")}
@@ -432,6 +489,22 @@ export function App() {
               {route && to && (
                 <>
                   <Itinerary route={route} destination={endpointLabel(to)} showLeave={!!arriveBy} />
+                  <button
+                    className="primary start"
+                    onClick={() => {
+                      setNavigating(true);
+                      setSheetOpen(false);
+                    }}
+                  >
+                    Start
+                  </button>
+                  {insideCard}
+                  <PlaceNamer
+                    key={endpointLabel(to)}
+                    at={endpointPosition(to)}
+                    defaultName={to.kind === "point" ? "" : endpointLabel(to)}
+                    onSave={(name, note) => saved.add(name, to.kind === "place" ? to.place.points : [endpointPosition(to)], note)}
+                  />
                   <p className="muted small">
                     Something wrong with this route?{" "}
                     <button className="link" onClick={() => openReport(true)}>
@@ -440,8 +513,23 @@ export function App() {
                   </p>
                 </>
               )}
+              {!to && saved.places.length > 0 && (
+                <div className="saved-places" aria-label="Your places">
+                  {saved.places.map((p) => (
+                    <span key={p.id} className="place-chip">
+                      <button onClick={() => setTo({ kind: "place", place: p })}>{p.name}</button>
+                      <button className="icon-btn" aria-label={`Forget ${p.name}`} onClick={() => saved.remove(p.id)}>
+                        <CloseIcon />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
               {!from && !to && (
-                <p className="muted small empty-hint">Pick a start and a destination, or add your classes in Schedule.</p>
+                <p className="muted small empty-hint">
+                  Pick a start and a destination (buildings, rooms like CENTR 115, or places like “Revelle bus stop”), or add
+                  your classes in Schedule.
+                </p>
               )}
             </>
           ) : tab === "schedule" ? (

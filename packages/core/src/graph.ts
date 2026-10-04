@@ -95,6 +95,17 @@ export class CampusGraph {
     return this.edgeKind[e] as EdgeKind;
   }
 
+  /** Path or street name of an edge, if it has one. */
+  edgeName(e: number): string | undefined {
+    const i = this.data.edgeNames?.[e] ?? -1;
+    return i >= 0 ? this.data.names?.[i] : undefined;
+  }
+
+  /** How many edges meet at a node (3+ means a junction where you could turn). */
+  degree(i: number): number {
+    return this.adjStart[i + 1] - this.adjStart[i];
+  }
+
   /** On the main walking network (so a walking route can always be found). */
   onWalkNetwork = (i: number): boolean => this.component[i] === this.mainComponent;
   /** On the main riding network. */

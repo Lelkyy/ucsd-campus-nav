@@ -58,6 +58,13 @@ export interface MapViewProps {
   showSatellite: boolean;
   /** A spot being reported (orange marker). */
   reportPin: LngLat | null;
+  /** Your live position while navigating, and whether the map should follow it. */
+  userPos: LngLat | null;
+  follow: boolean;
+  /** Doors of the destination building; `used` is the one the route ends at. */
+  doors: { lngLat: LngLat; used: boolean }[];
+  /** A mapped indoor room to point at, with its label. */
+  room: { lngLat: LngLat; label: string } | null;
   /** Taps mark a spot rather than set a route endpoint: show a crosshair. */
   pickingSpot: boolean;
   onMapClick: (p: LngLat) => void;
@@ -67,7 +74,8 @@ export interface MapViewProps {
 export function MapView(props: MapViewProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
-  const markers = useRef<{ from: Marker; to: Marker; report: Marker } | null>(null);
+  const markers = useRef<{ from: Marker; to: Marker; report: Marker; user: Marker; room: Marker } | null>(null);
+  const roomLabel = useRef<HTMLSpanElement | null>(null);
   const [ready, setReady] = useState(false);
   const lastTrip = useRef<string | null>(null);
 
@@ -104,6 +112,8 @@ export function MapView(props: MapViewProps) {
       from: new Marker({ color: "#27ae60" }),
       to: new Marker({ color: "#eb5757" }),
       report: new Marker({ color: "#f59e0b" }),
+      user: new Marker({ element: dotElement("user-dot") }),
+      room: new Marker({ element: roomElement(roomLabel), anchor: "bottom" }),
     };
 
     map.on("load", () => {
@@ -120,7 +130,7 @@ export function MapView(props: MapViewProps) {
         firstSymbol,
       );
 
-      for (const id of ["network", "route", "connectors", "stops"]) {
+      for (const id of ["network", "route", "connectors", "stops", "doors"]) {
         map.addSource(id, { type: "geojson", data: EMPTY });
       }
       map.addLayer({
@@ -190,6 +200,18 @@ export function MapView(props: MapViewProps) {
         filter: ["!=", ["get", "kind"], "walk"],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": ["get", "color"], "line-width": 7 },
+      });
+      map.addLayer({
+        id: "doors",
+        type: "circle",
+        source: "doors",
+        minzoom: 16,
+        paint: {
+          "circle-radius": ["case", ["get", "used"], 7, 4.5],
+          "circle-color": ["case", ["get", "used"], "#16a34a", "#ffffff"],
+          "circle-stroke-color": ["case", ["get", "used"], "#ffffff", "#14532d"],
+          "circle-stroke-width": 2,
+        },
       });
       map.addLayer({
         id: "connectors",
@@ -272,11 +294,29 @@ export function MapView(props: MapViewProps) {
       [m.from, props.from],
       [m.to, props.to],
       [m.report, props.reportPin],
+      [m.user, props.userPos],
+      [m.room, props.room?.lngLat ?? null],
     ] as const) {
       if (pos) marker.setLngLat(pos).addTo(map);
       else marker.remove();
     }
-  }, [props.from, props.to, props.reportPin]);
+    if (roomLabel.current) roomLabel.current.textContent = props.room?.label ?? "";
+  }, [props.from, props.to, props.reportPin, props.userPos, props.room]);
+
+  // Navigation: keep your position in view.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !props.follow || !props.userPos) return;
+    map.easeTo({ center: props.userPos, zoom: Math.max(map.getZoom(), 17.5), duration: 600, padding: fitPadding() });
+  }, [props.follow, props.userPos]);
+
+  useEffect(() => {
+    if (!ready) return;
+    source(mapRef.current!, "doors").setData({
+      type: "FeatureCollection",
+      features: props.doors.map((d) => ({ type: "Feature", properties: { used: d.used }, geometry: { type: "Point", coordinates: d.lngLat } })),
+    });
+  }, [ready, props.doors]);
 
   useEffect(() => {
     const canvas = mapRef.current?.getCanvas();
@@ -290,6 +330,22 @@ export function MapView(props: MapViewProps) {
 function fitPadding() {
   if (window.innerWidth > 760) return { top: 60, right: 70, bottom: 60, left: 440 };
   return { top: 70, right: 40, bottom: Math.round(window.innerHeight * 0.5), left: 40 };
+}
+
+function dotElement(className: string): HTMLElement {
+  const el = document.createElement("div");
+  el.className = className;
+  return el;
+}
+
+/** A small pill pointing at a room ("1202 · Ground level"). */
+function roomElement(label: { current: HTMLSpanElement | null }): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "room-pin";
+  const text = document.createElement("span");
+  el.appendChild(text);
+  label.current = text;
+  return el;
 }
 
 function source(map: MlMap, id: string): GeoJSONSource {

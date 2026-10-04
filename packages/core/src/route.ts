@@ -117,6 +117,10 @@ export interface MoveLeg {
   stairSegments: number;
   /** Bike legs: meters where the bike has to be walked (footpaths, stairs). */
   pushMeters: number;
+  /** Graph node at each coordinate (-1 at a shuttle stop). */
+  nodes: number[];
+  /** Graph edge between consecutive coordinates (-1 for the walk to/from a stop). */
+  edges: number[];
 }
 
 export interface BusLeg {
@@ -288,13 +292,16 @@ function buildRoute(
   const midnight = new Date(departAt);
   midnight.setHours(0, 0, 0, 0);
   const at = (secondsOfDay: number) => new Date(midnight.getTime() + secondsOfDay * 1000);
-  const newMove = (from: LngLat): MoveLeg => ({
+  const n = graph.nodeCount;
+  const newMove = (fromNode: number): MoveLeg => ({
     mode: profile.travel,
-    coordinates: [from],
+    coordinates: [pos(fromNode)],
     meters: 0,
     seconds: 0,
     stairSegments: 0,
     pushMeters: 0,
+    nodes: [fromNode < n ? fromNode : -1],
+    edges: [],
   });
 
   for (const { node, step } of chain) {
@@ -315,7 +322,7 @@ function buildRoute(
         arrives: at(times[step.toPos]),
       });
     } else {
-      if (!move) legs.push((move = newMove(pos(last))));
+      if (!move) legs.push((move = newMove(last)));
       const [a, b] = [pos(last), pos(node)];
       if (step.kind === "edge") {
         const kind = graph.kind(step.edge);
@@ -325,17 +332,20 @@ function buildRoute(
         move.seconds += meters / speed;
         move.stairSegments += kind === EdgeKind.Steps ? 1 : 0;
         if (profile.travel === "bike" && speed < PUSH_THRESHOLD) move.pushMeters += meters;
+        move.edges.push(step.edge);
       } else {
+        move.edges.push(-1);
         // Walking to or from a shuttle stop.
         const meters = haversine(a[0], a[1], b[0], b[1]);
         move.meters += meters;
         move.seconds += meters / WALKING_SPEED_MPS;
       }
       move.coordinates.push(b);
+      move.nodes.push(node < n ? node : -1);
     }
     last = node;
   }
-  if (legs.length === 0) legs.push(newMove(pos(start)));
+  if (legs.length === 0) legs.push(newMove(start));
   mergeStayOnBoard(legs);
 
   // Timeline: travel before the first bus is timed backwards from its departure.

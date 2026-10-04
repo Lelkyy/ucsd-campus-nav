@@ -7,3 +7,6 @@ export * from "./search.ts";
 export * from "./plan.ts";
 export * from "./transit.ts";
 export * from "./sections.ts";
+export * from "./instructions.ts";
+export * from "./nav.ts";
+export * from "./indoor.ts";

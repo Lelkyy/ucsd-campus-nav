@@ -3,6 +3,8 @@ import {
   TransitNetwork,
   type Building,
   type GraphData,
+  type IndoorData,
+  type PlacesData,
   type SectionsData,
   type TransitData,
 } from "@campus/core";
@@ -16,16 +18,22 @@ export interface CampusData {
   transit: TransitNetwork;
   /** Current term's course sections, when the (private) schedule data has been built. */
   sections: SectionsData | null;
+  /** Rooms mapped indoors, by building id. */
+  indoor: IndoorData;
+  /** Student place names, shuttle stops and building tips. */
+  places: PlacesData;
 }
 
 /** Load the prebuilt graph, buildings, shuttles and sections. `bust` forces a re-fetch after an edit. */
 export async function loadCampus(bust = false): Promise<CampusData> {
   const q = bust ? `?t=${Date.now()}` : "";
-  const [graphData, buildings, transitData, sections] = await Promise.all([
+  const [graphData, buildings, transitData, sections, indoor, places] = await Promise.all([
     fetchJson<GraphData>(`/data/graph.json${q}`),
     fetchJson<Building[]>(`/data/buildings.json${q}`),
     fetchJson<TransitData>(`/data/transit.json${q}`),
     fetchJson<SectionsData>(`/data/sections.json${q}`).catch(() => null),
+    fetchJson<IndoorData>(`/data/indoor.json${q}`).catch(() => ({})),
+    fetchJson<PlacesData>(`/data/places.json${q}`).catch(() => ({ places: [], tips: {} })),
   ]);
   const graph = new CampusGraph(graphData);
   const buildingByCode = new Map<string, Building>();
@@ -44,6 +52,8 @@ export async function loadCampus(bust = false): Promise<CampusData> {
     buildingByCode,
     transit: new TransitNetwork(transitData, graph),
     sections,
+    indoor,
+    places,
   };
 }
 

@@ -1,0 +1,13 @@
+{
+  "_about": "Names students use for places maps don't know. Each place lists shuttle stops by their exact timetable name ('stops') and/or [longitude, latitude] spots ('points'); a route goes to the closest. 'tips' are shown when you're headed to a building code or 'CODE ROOM'. Suggestions arrive by email from the app's 'Name this place' button.",
+  "places": [
+    { "name": "Revelle bus stop", "aliases": ["Revelle stop", "Revelle shuttle"], "stops": ["Revelle College (East)", "Revelle College (West)"] },
+    { "name": "Muir bus stop", "aliases": ["Muir stop", "Muir shuttle"], "stops": ["Muir College (East)", "Muir College (West)"] },
+    { "name": "Sixth bus stop", "aliases": ["Sixth stop", "Sixth shuttle"], "stops": ["Sixth College (East)", "Sixth College (West)"] },
+    { "name": "Seventh bus stop", "aliases": ["Seventh stop", "Seventh shuttle"], "stops": ["Seventh College (East)", "Seventh College (West)"] },
+    { "name": "Eighth bus stop", "aliases": ["Eighth stop", "Theatre District stop"], "stops": ["Eighth College / Theatre District (North)", "Eighth College / Theatre District (South)"] },
+    { "name": "GTC", "aliases": ["Gilman Transit Center", "Gilman bus stop", "transit center"], "stops": ["Gilman Transit Center (North)", "Gilman Transit Center (South)"] },
+    { "name": "RIMAC bus stop", "aliases": ["RIMAC stop", "Hopkins bus stop"], "stops": ["RIMAC / Hopkins Parking Structure (East)", "RIMAC / Hopkins Parking Structure (West)"] }
+  ],
+  "tips": {}
+}

@@ -22,6 +22,14 @@ the way, using the paths, stairs and bike paths students actually use.
 - **Leave-by times:** for your next class, in whichever mode you picked.
 - **Every classroom:** 556 rooms across 84 building codes are mapped to
   buildings; the few that aren't are listed with the reason.
+- **Live directions:** press Start for turn-by-turn navigation that follows your
+  GPS ("In 120 ft, turn left onto Library Walk"), re-routes when you go off
+  course, can speak instructions, and keeps the screen on.
+- **Inside the building:** which door to use (main or wheelchair-accessible doors
+  when mapped), which floor the room is on (from the map where rooms are mapped,
+  otherwise from the room number), and elevators.
+- **Student place names:** search "Revelle bus stop", "GTC" and other names
+  students use. Name any spot yourself, and suggest names for everyone.
 - **Report a problem:** tap the spot on the map, pick what's wrong, and send it
   by email (prefilled with the location and details).
 
