@@ -1,6 +1,7 @@
-import { floorPlan, levelLabel, levelsOf, type Building, type IndoorRoom, type IndoorRoute, type InsideHints, type LngLat } from "@campus/core";
+import { floorPlan, levelLabel, levelsOf, type Building, type IndoorRoom, type IndoorRoute, type InsideHints } from "@campus/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CloseIcon } from "./Icons.tsx";
+import { fitProjection } from "./planProjection.ts";
 
 const W = 640;
 const PAD = 36;
@@ -82,24 +83,11 @@ export function BuildingView({ building, room, indoorRooms, hints, way, onClose 
           : way.legs[phase.leg].level;
   const level = pickedLevel ?? animLevel;
 
-  // Local flat projection: meters east/south of the building's north-west corner.
+  // To scale and north up, framing the walls, the way and the door.
   const outline = building.outline ?? [];
   const door = hints.entrance;
-  const pts = [...outline.flat(), ...way.legs.flatMap((l) => l.points), ...(door ? [door.lngLat] : [])];
-  const lat0 = building.center[1];
-  const mx = 111_320 * Math.cos((lat0 * Math.PI) / 180);
-  const my = 110_574;
-  const minX = Math.min(...pts.map((p) => p[0] * mx));
-  const maxX = Math.max(...pts.map((p) => p[0] * mx));
-  const minY = Math.min(...pts.map((p) => -p[1] * my));
-  const maxY = Math.max(...pts.map((p) => -p[1] * my));
-  const widthM = Math.max(1, maxX - minX);
-  const heightM = Math.max(1, maxY - minY);
-  const scale = (W - 2 * PAD) / Math.max(widthM, heightM);
-  const H = Math.round(heightM * scale + 2 * PAD);
-  const offX = (W - widthM * scale) / 2;
-  const xy = ([lon, lat]: LngLat): [number, number] => [offX + (lon * mx - minX) * scale, PAD + (-lat * my - minY) * scale];
-  const ringPath = (ring: LngLat[]) => ring.map((p, i) => `${i ? "L" : "M"}${xy(p).map((v) => v.toFixed(1)).join(",")}`).join("") + "Z";
+  const proj = fitProjection([...outline.flat(), ...way.legs.flatMap((l) => l.points), ...(door ? [door.lngLat] : [])], W, PAD);
+  const { xy, scale, widthM, height: H, ring: ringPath } = proj;
   const linePath = (line: [number, number][]) => line.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join("");
 
   const legsXY = way.legs.map((l) => l.points.map(xy));

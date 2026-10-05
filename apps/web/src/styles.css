@@ -837,3 +837,50 @@ button.start { width: 100%; padding: 11px; font-size: 15px; border-radius: 999px
   .inside-view { inset: 0; padding: 8px; background: rgb(0 0 0 / 0.35); pointer-events: auto; }
   .inside-view-body { grid-template-columns: 38px 1fr; }
 }
+
+/* ---------- Room card (top-right corner of the map) ---------- */
+.room-inset {
+  position: absolute;
+  z-index: 2;
+  top: 16px;
+  right: 16px;
+  width: 188px;
+  padding: 10px 10px 8px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+}
+.inset-head { display: flex; flex-direction: column; gap: 1px; margin-bottom: 6px; }
+.inset-head strong { font-size: 14px; }
+.inset-building { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.inset-floor { font-weight: 600; color: #7c3aed; }
+.inset-draw { display: block; width: 100%; padding: 0; border: none; background: none; border-radius: 6px; cursor: pointer; }
+.inset-draw:hover .inset-walls { stroke: var(--accent); }
+.inset-svg { display: block; width: 100%; height: auto; }
+.inset-walls { fill: var(--surface-2); stroke: var(--text); stroke-width: 1.5; stroke-linejoin: round; }
+.inset-space { fill: var(--surface); stroke: #94a3b8; stroke-width: 0.6; }
+.inset-space.corridor, .inset-space.area { fill: color-mix(in srgb, var(--surface-2) 70%, #cbd5e1); }
+.inset-space.target { fill: #7c3aed; stroke: #5b21b6; stroke-width: 1.2; }
+.inset-ring { fill: none; stroke: #7c3aed; stroke-width: 2; opacity: 0.55; }
+.inset-pin { fill: #7c3aed; stroke: #fff; stroke-width: 1.5; }
+.inset-door { fill: #16a34a; stroke: #fff; stroke-width: 1.5; }
+.inset-note { margin: 0; color: var(--muted); line-height: 1.4; }
+.inset-foot { display: flex; justify-content: space-between; gap: 6px; margin-top: 4px; font-size: 11px; }
+.inset-foot > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inset-cta { flex: none; color: #7c3aed; font-weight: 600; }
+/* The map's zoom/locate buttons and chips move down below the card. */
+.app.has-inset .maplibregl-ctrl-top-right { top: calc(var(--inset-h) + 24px); }
+.app.has-inset .map-tools { top: calc(var(--inset-h) + 164px); }
+/* While navigating, the instruction banner stops short of the card. */
+.app.navigating.has-inset .nav-banner { right: 220px; }
+@media (max-width: 760px) {
+  .room-inset { top: 12px; right: 12px; width: 150px; padding: 8px 8px 6px; }
+  .app.has-inset .maplibregl-ctrl-top-right { top: calc(var(--inset-h) + 16px); }
+  .app.has-inset .map-tools { top: 12px; }
+  /* The banner spans the top on phones, so the card goes under it. */
+  .app.navigating .room-inset { top: 104px; }
+  .app.navigating.has-inset .nav-banner { right: 12px; }
+  /* No room for the zoom buttons under both; the map follows you, and pinching zooms. */
+  .app.navigating.has-inset .maplibregl-ctrl-top-right { display: none; }
+}

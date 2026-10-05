@@ -100,6 +100,11 @@ Ask Leonid for the files. Don't commit them or the generated
   has no outline, its floor has no mapped corridor, the door is more than 6 m from
   mapped space, or nothing connects them. In CSE, floors 2–4 have rooms but no
   corridors, so only ground-floor and basement rooms get a route.
+- **Room card** (`RoomInset.tsx`): whenever the destination is a room, the map's
+  top-right corner shows the building's walls with the room highlighted on its
+  floor (mapped rooms), or its spot (student pins). Unmapped rooms get text only:
+  the floor from the room number and "Pin it". Tapping the drawing opens the
+  inside view when there's a mapped way, else zooms the map to the room.
 - **Inside view** (`BuildingView.tsx`): draws the floor plan to scale with the
   route; a dot walks it and the view switches floors at the stairs/elevator
   ("Take the stairs down to basement"), with Replay. During navigation it opens

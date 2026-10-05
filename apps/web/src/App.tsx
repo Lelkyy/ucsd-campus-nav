@@ -42,6 +42,7 @@ import {
   WalkIcon,
 } from "./Icons.tsx";
 import { InsideCard } from "./InsideCard.tsx";
+import { RoomInset } from "./RoomInset.tsx";
 import { NavigationView } from "./NavigationView.tsx";
 import { TimingControl, type TimingState } from "./TimingControl.tsx";
 import { TransitPanel } from "./TransitPanel.tsx";
@@ -77,6 +78,8 @@ export function App() {
   const [focus, setFocus] = useState<{ at: LngLat; zoom: number; key: number } | null>(null);
   /** The drawn inside view of the destination building is open. */
   const [insideOpen, setInsideOpen] = useState(false);
+  /** Height of the room card in the map's corner, so the map buttons sit below it. */
+  const [insetHeight, setInsetHeight] = useState(0);
   /** Indoor maps plus rooms pinned on this device (pins win over guesses). */
   const indoor = useMemo<IndoorData>(() => {
     if (!data) return {};
@@ -311,6 +314,16 @@ export function App() {
   useEffect(() => setPlanLevel(null), [destBuilding?.id, destRoom]);
   const roomKey = (building: { id: string; aliases: string[] }, room: string) =>
     `${building.aliases.find((a) => /^[A-Z0-9-]{2,6}$/.test(a)) ?? building.id} ${room}`;
+  const destMappedRoom = destRoom ? findRoom(planRooms, destRoom) : undefined;
+  const pinDestRoom =
+    destBuilding && destRoom
+      ? () => {
+          setInsideOpen(false);
+          setPinning({ key: roomKey(destBuilding, destRoom) });
+          setPinAt(null);
+          setFocus({ at: destBuilding.center, zoom: 18.6, key: Date.now() });
+        }
+      : undefined;
   const tips = useMemo(() => {
     if (!data || !destBuilding) return [];
     const codes = destBuilding.aliases.filter((a) => /^[A-Z0-9-]{2,6}$/.test(a));
@@ -333,16 +346,7 @@ export function App() {
             : undefined
         }
         onOpenInside={indoorWay ? () => setInsideOpen(true) : undefined}
-        onPinRoom={
-          destRoom
-            ? () => {
-                setInsideOpen(false);
-                setPinning({ key: roomKey(destBuilding, destRoom) });
-                setPinAt(null);
-                setFocus({ at: destBuilding.center, zoom: 18.6, key: Date.now() });
-              }
-            : undefined
-        }
+        onPinRoom={pinDestRoom}
       />
     ) : null;
 
@@ -428,7 +432,10 @@ export function App() {
   if (loadError) return <div className="fatal">Couldn't load campus data. {loadError}</div>;
 
   return (
-    <div className={`app ${navigating ? "navigating" : ""}`}>
+    <div
+      className={`app ${navigating ? "navigating" : ""} ${insetHeight ? "has-inset" : ""}`}
+      style={{ ["--inset-h" as string]: `${insetHeight}px` }}
+    >
       {data && (
         <MapView
           graph={data.graph}
@@ -482,6 +489,28 @@ export function App() {
           </div>
         )}
       </div>
+
+      {destBuilding && destRoom && !pinning && (
+        <RoomInset
+          key={`${destBuilding.id}-${destRoom}`}
+          building={destBuilding}
+          room={destRoom}
+          mapped={destMappedRoom}
+          indoorRooms={planRooms}
+          door={inside?.entrance}
+          onOpenInside={indoorWay ? () => setInsideOpen(true) : undefined}
+          onShowRoom={
+            destMappedRoom
+              ? () => {
+                  setPlanLevel(null);
+                  setFocus({ at: destMappedRoom.center, zoom: 19.4, key: Date.now() });
+                }
+              : undefined
+          }
+          onPinRoom={pinDestRoom}
+          onHeight={setInsetHeight}
+        />
+      )}
 
       {insideOpen && destBuilding && destRoom && inside && indoorWay && (
         <BuildingView
