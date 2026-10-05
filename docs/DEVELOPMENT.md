@@ -50,6 +50,16 @@ data/private/* (TSS) ──────┘                               ▼
   - Only buildings inside the OSM campus boundary are included. Each building
     gets route targets: mapped entrances when OSM has them, otherwise path
     points along its walls.
+  - **UC San Diego's building list** (the public Campus Map's
+    `Buildings_Public` layers, used with the campus GIS team's OK; cached in
+    `data/raw/ucsd-building*.geojson`, refreshed with `--refresh`) adds official
+    names and codes ("CSE", "HDSI") to the OSM building that is the same one
+    (matched one-to-one: same name within 80 m, else the same shape at a similar
+    size), and adds the buildings OSM is missing or hasn't named, from UCSD's
+    footprint or, failing that, its point. OSM names stay unless listed under
+    `renames` in `data/building-codes.json` (e.g. Literature -> HDSI, which
+    replaced it). `VERBOSE=1 npm run build:graph` lists shape matches whose names
+    differ, for review.
 
 ## Course sections (private)
 

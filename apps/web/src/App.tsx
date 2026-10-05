@@ -741,7 +741,7 @@ export function App() {
         </div>
 
         <footer className="sheet-foot">
-          Paths © OpenStreetMap contributors · Schedules from Triton Transit and San Diego MTS (scheduled, not live) · Not
+          Paths © OpenStreetMap contributors · Building names and outlines from UC San Diego's Campus Map · Schedules from Triton Transit and San Diego MTS (scheduled, not live) · Not
           an official UC San Diego app
         </footer>
       </aside>

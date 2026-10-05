@@ -56,12 +56,14 @@
     "RVCOM": "Revelle Commons",
     "SCRM": "Sanford Consortium for Regenerative Medicine",
     "SDSC": "San Diego Supercomputer Center",
+    "SEVW2": "Seventh College West #2",
     "SME": "Structural and Materials Engineering",
     "SOLIS": "Solis Hall",
     "SPIES": "Spiess Hall",
     "SSRB": "Social Sciences Research Building",
     "STCTR": "Student Services Center",
     "SUMNR": "Sumner Auditorium",
+    "TASB": "Triton Administrative Services Building",
     "TATA": "Tata Hall for the Sciences",
     "UNEXG": "UCSD Extended Studies",
     "UNEXN": "UCSD Extended Studies",
@@ -78,10 +80,9 @@
   ],
   "unplaced": {
     "CCC": "code only seen in 2025-26 schedules; not identified",
-    "HDSI": "Halicioglu Data Science Institute building is not in OpenStreetMap",
-    "SEQUO": "Sequoyah Hall (Marshall College) is not in OpenStreetMap",
-    "SEVW2": "Seventh College West building 2 is not named in OpenStreetMap",
-    "SSB": "Social Sciences Building is not named in OpenStreetMap",
-    "TASB": "Triton Administrative Services Building is not in OpenStreetMap"
+    "SEQUO": "Sequoyah Hall (Marshall College) is not in OpenStreetMap"
+  },
+  "renames": {
+    "Literature": "Halicioglu Data Science Institute"
   }
 }

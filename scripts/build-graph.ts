@@ -7,7 +7,11 @@
  *      buildings in data/custom-paths.geojson
  *   4. roads pruned to the stretches that are the only link to a campus building or
  *      shuttle stop; pieces of network with no building or stop on them dropped
- *   5. schedule codes from data/building-codes.json (plus automatic matches) added as
+ *   5. UC San Diego's building list (official names, codes and footprints from the
+ *      public Campus Map, used with the campus GIS team's OK; cached in
+ *      data/raw/ucsd-buildings.geojson): aliases for buildings OSM has, and the
+ *      buildings OSM is missing or hasn't named
+ *   6. schedule codes from data/building-codes.json (plus automatic matches) added as
  *      aliases, and checked against every room in data/rooms.json
  * Writes apps/web/public/data/{graph,buildings,transit}.json.
  */
@@ -36,6 +40,11 @@ import { readGtfs, toSeconds, type Row } from "./gtfs.ts";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RAW_OSM = join(ROOT, "data/raw/osm.json");
 const RAW_GTFS_DIR = join(ROOT, "data/raw/gtfs");
+const RAW_UCSD = join(ROOT, "data/raw/ucsd-buildings.geojson");
+const RAW_UCSD_POINTS = join(ROOT, "data/raw/ucsd-building-points.geojson");
+/** Building footprints from UC San Diego's public Campus Map (campusmap.ucsd.edu). */
+const UCSD_BUILDINGS = "https://admin-enterprise-gis.ucsd.edu/server/rest/services/AdministrationServices/Buildings_Public/MapServer";
+const UCSD_QUERY = "/query?where=1%3D1&outFields=OBJECTID,FacilityLongName,BuildingAliases&outSR=4326&resultRecordCount=2000&f=geojson";
 const CUSTOM_PATH = join(ROOT, "data/custom-paths.geojson");
 const BLOCKED_PATH = join(ROOT, "data/blocked-ways.json");
 const CODES_PATH = join(ROOT, "data/building-codes.json");
@@ -53,6 +62,8 @@ interface CodeFile {
   notPlaces: string[];
   /** Real places we can't put on the map yet, with the reason. */
   unplaced: Record<string, string>;
+  /** OSM building names that are out of date -> the building's current name. */
+  renames?: Record<string, string>;
 }
 const OUT_DIR = join(ROOT, "apps/web/public/data");
 
@@ -120,6 +131,8 @@ interface RawBuilding {
   /** Outline polylines (outer rings). */
   lines: LngLat[][];
   center: LngLat;
+  /** Names and codes from UC San Diego's building list. */
+  extraAliases?: string[];
 }
 
 /** [from, to, kind, bikes allowed, index into the path-name table or -1] */
@@ -130,6 +143,7 @@ const walkable = (kind: EdgeKind) => kind !== EdgeKind.BikeOnly;
 async function main() {
   const refresh = process.argv.includes("--refresh");
   if (refresh || !existsSync(RAW_OSM)) await fetchOsm();
+  if (refresh || !existsSync(RAW_UCSD) || !existsSync(RAW_UCSD_POINTS)) await fetchUcsdBuildings();
   for (const feed of FEEDS) {
     const path = join(RAW_GTFS_DIR, `${feed.id}.zip`);
     if (refresh || !existsSync(path)) await fetchFeed(feed, path);
@@ -236,6 +250,65 @@ async function main() {
     const outer = r.members.filter((m) => m.type === "way" && m.role !== "inner" && m.geometry);
     pushBuilding(`r${r.id}`, r.tags, outer.map((m) => toLine(m.geometry!)));
   }
+  // UC San Diego's own list: its names and codes ("CSE", "HDSI") go on the OSM building
+  // that is the same building; buildings OSM lacks (or hasn't named) come in with UCSD's
+  // footprint. Matching is one-to-one: first by name nearby, then by shape (each middle
+  // inside the other, or practically the same middle, at a similar size).
+  const codeFile: CodeFile = existsSync(CODES_PATH)
+    ? JSON.parse(readFileSync(CODES_PATH, "utf8"))
+    : { codes: {}, notPlaces: [], unplaced: {} };
+  const ucsd = readUcsdBuildings();
+  const claimed = new Map<RawBuilding, (typeof ucsd)[number]>();
+  const osmBuildings = [...rawBuildings];
+  const dist = (a: LngLat, b: LngLat) => haversine(a[0], a[1], b[0], b[1]);
+  const inside = (p: LngLat, lines: LngLat[][]) => lines.some((ring) => ring.length > 3 && pointInRing(p, ring));
+  const area = (lines: LngLat[][]) => lines.reduce((sum, ring) => sum + ringArea(ring), 0);
+  const unmatched: typeof ucsd = [];
+  for (const u of ucsd) {
+    const names = new Set([u.name, ...u.aliases].map(normalize));
+    const b = osmBuildings.find((b) => !claimed.has(b) && names.has(normalize(b.name)) && dist(b.center, u.center) < 80);
+    if (b) claimed.set(b, u);
+    else unmatched.push(u);
+  }
+  const differentNames: string[] = [];
+  for (const u of unmatched) {
+    const size = area(u.lines);
+    const b = osmBuildings.find((b) => {
+      if (claimed.has(b)) return false;
+      const ratio = area(b.lines) / Math.max(1, size);
+      if (ratio < 0.5 || ratio > 2) return false;
+      return dist(b.center, u.center) < 12 || (inside(u.center, b.lines) && inside(b.center, u.lines));
+    });
+    if (b) {
+      claimed.set(b, u);
+      differentNames.push(`${b.name} = ${u.name}`);
+    } else {
+      rawBuildings.push({ id: `u${u.id}`, name: u.name, tags: {}, lines: u.lines, center: u.center, extraAliases: u.aliases });
+    }
+  }
+  for (const [b, u] of claimed) b.extraAliases = [...(b.extraAliases ?? []), u.name, ...u.aliases];
+  // Buildings UCSD lists only as a point: a name for the building there, or a place of their own.
+  const footprintNames = new Set(ucsd.map((u) => normalize(u.name)));
+  const ucsdPoints: { name: string; aliases: string[]; at: LngLat }[] = [];
+  for (const p of readUcsdPoints()) {
+    if (footprintNames.has(normalize(p.name))) continue;
+    const names = new Set([p.name, ...p.aliases].map(normalize));
+    const b =
+      rawBuildings.find((b) => [b.name, ...(b.extraAliases ?? [])].some((n) => names.has(normalize(n))) && dist(b.center, p.at) < 80) ??
+      rawBuildings.find((b) => inside(p.at, b.lines));
+    if (b) b.extraAliases = [...(b.extraAliases ?? []), p.name, ...p.aliases];
+    else ucsdPoints.push(p);
+  }
+  // Outdated OSM names, fixed by hand (data/building-codes.json "renames").
+  for (const b of rawBuildings) {
+    const name = codeFile.renames?.[b.name];
+    if (name) {
+      b.extraAliases = [...(b.extraAliases ?? []), b.name];
+      b.name = name;
+    }
+  }
+  const ucsdMatched = claimed.size;
+  const ucsdAdded = rawBuildings.length - osmBuildings.length;
   const campusBuildings = rawBuildings.filter((b) => inCampus(b.center));
   const offCampusCount = rawBuildings.length - campusBuildings.length;
 
@@ -337,9 +410,12 @@ async function main() {
   // the shortest-path tree from central campus, with roads heavily discouraged.
   const required = new Set<number>();
   for (const b of campusBuildings) targetsOf(b, () => true).targets.forEach((t) => required.add(t));
-  for (const f of custom.features) {
-    if (f.geometry?.type !== "Point" || !f.properties?.name) continue;
-    const i = index.nearest(f.geometry.coordinates as LngLat, 80);
+  const pointPlaces = [
+    ...custom.features.flatMap((f) => (f.geometry?.type === "Point" && f.properties?.name ? [f.geometry.coordinates as LngLat] : [])),
+    ...ucsdPoints.filter((p) => inCampus(p.at)).map((p) => p.at),
+  ];
+  for (const at of pointPlaces) {
+    const i = index.nearest(at, 80);
     if (i !== -1) required.add(i);
   }
   for (const p of stopPositions) {
@@ -412,9 +488,13 @@ async function main() {
       unreachable.push(b.name);
       continue;
     }
-    const aliases = ["short_name", "alt_name", "abbr_name", "official_name", "old_name", "ref", "loc_name", "name:en"]
-      .flatMap((k) => (b.tags[k] ? b.tags[k].split(";").map((s) => s.trim()) : []))
-      .filter((a) => a && a !== b.name);
+    const aliases = [
+      ...["short_name", "alt_name", "abbr_name", "official_name", "old_name", "ref", "loc_name", "name:en"].flatMap((k) =>
+        b.tags[k] ? b.tags[k].split(";").map((s) => s.trim()) : [],
+      ),
+      // Shortest first, so codes like "CSE" lead.
+      ...[...(b.extraAliases ?? [])].sort((x, y) => x.length - y.length),
+    ].filter((a, i, all) => a && normalize(a) !== normalize(b.name) && all.findIndex((x) => normalize(x) === normalize(a)) === i);
     const doors: Entrance[] = entrancesOf(b).map((e) => {
       const n = entrances[e];
       const node = osmIndex.get(n.id);
@@ -455,18 +535,26 @@ async function main() {
       outline: b.lines.map((ring) => ring.map(([x, y]) => [round6(x), round6(y)] as LngLat)),
     });
   }
-  for (const f of custom.features) {
-    if (f.geometry?.type !== "Point" || !f.properties?.name) continue;
-    const center = f.geometry.coordinates as LngLat;
+  // Point buildings: hand-placed ones, and campus buildings UCSD lists without a footprint.
+  const points = [
+    ...custom.features.flatMap((f) =>
+      f.geometry?.type === "Point" && f.properties?.name
+        ? [{ id: `c${f.properties.id ?? f.properties.name}`, name: String(f.properties.name), aliases: (f.properties.aliases ?? []) as string[], at: f.geometry.coordinates as LngLat, custom: true }]
+        : [],
+    ),
+    ...ucsdPoints.filter((p) => inCampus(p.at)).map((p, i) => ({ id: `p${i}`, name: p.name, aliases: p.aliases, at: p.at, custom: false })),
+  ];
+  for (const p of points) {
+    const center = p.at;
     const target = finalIndex.nearest(center, 80, (i) => walkNode[i] === 1 && comps.id[i] === mainComponent);
     if (target === -1) {
-      unreachable.push(`${f.properties.name} (custom)`);
+      unreachable.push(`${p.name} (${p.custom ? "custom" : "UCSD point"})`);
       continue;
     }
     buildings.push({
-      id: `c${f.properties.id ?? buildings.length}`,
-      name: f.properties.name,
-      aliases: f.properties.aliases ?? [],
+      id: p.id,
+      name: p.name,
+      aliases: p.aliases,
       center: [round(center[0]), round(center[1])],
       targets: [target],
       entranceCount: 0,
@@ -486,9 +574,6 @@ async function main() {
       x.localeCompare(y, undefined, { numeric: true }),
     );
   }
-  const codeFile: CodeFile = existsSync(CODES_PATH)
-    ? JSON.parse(readFileSync(CODES_PATH, "utf8"))
-    : { codes: {}, notPlaces: [], unplaced: {} };
   const scheduleCodes = [...new Set([...Object.keys(codeFile.codes), ...Object.keys(roomsData?.rooms ?? {})])].sort();
   const unresolved: string[] = [];
   const unplaced: string[] = [];
@@ -500,7 +585,9 @@ async function main() {
     // (an OSM ref, or a hand-placed building with the code as an alias).
     const matches = name
       ? buildings.filter((b) =>
-          name.endsWith("*") ? normalize(b.name).startsWith(normalize(name.slice(0, -1))) : normalize(b.name) === normalize(name),
+          name.endsWith("*")
+            ? normalize(b.name).startsWith(normalize(name.slice(0, -1)))
+            : [b.name, ...b.aliases].some((n) => normalize(n) === normalize(name)),
         )
       : buildings.filter((b) => b.aliases.some((a) => a.toUpperCase() === code));
     if (matches.length === 0) {
@@ -569,6 +656,8 @@ async function main() {
       `nodes ${finalCoords.length}, edges ${finalEdges.length} (walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
       `walking network: ${new Set(Array.from(comps.id).filter((_, i) => walkNode[i])).size} pieces (main: ${mainSize} nodes); riding network main: ${bikeComps.size[mainBikeComponent]} nodes`,
       `blocked ways ${blockedCount}, custom paths ${customCount}`,
+      process.env.VERBOSE ? `matched by shape, names differ: ${differentNames.join("; ")}` : "",
+      `UCSD building list: ${ucsdMatched} matched to OSM buildings (${differentNames.length} by shape), ${ucsdAdded} added from UCSD footprints`,
       `campus buildings ${buildings.length}: ${count("walk")} on foot, ${count("shuttle")} shuttle-only, ` +
         `${buildings.filter((b) => b.entranceCount > 0).length} with mapped entrances (${offCampusCount} off-campus skipped)`,
       `transit: ${new Set(transit.patterns.map((p) => p.route)).size} routes in use, ${transit.stops.length} stops, ${transit.patterns.reduce((sum, p) => sum + p.trips.length, 0)} trips`,
@@ -706,6 +795,57 @@ out body geom;`;
     }
   }
   throw new Error("All Overpass endpoints failed; try again later.");
+}
+
+async function fetchUcsdBuildings(): Promise<void> {
+  console.log("Fetching UC San Diego building list ...");
+  // Layer 1: footprints; layer 0: a point per building (some have no footprint).
+  for (const [layer, path] of [[1, RAW_UCSD], [0, RAW_UCSD_POINTS]] as const) {
+    const res = await fetch(`${UCSD_BUILDINGS}/${layer}${UCSD_QUERY}`, {
+      headers: { "User-Agent": "ucsd-campus-nav build" },
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) throw new Error(`UCSD buildings: HTTP ${res.status}`);
+    const data = (await res.json()) as GeoJSON.FeatureCollection;
+    if (!Array.isArray(data.features)) throw new Error("UCSD buildings: unexpected response");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(data));
+  }
+}
+
+/** Buildings UCSD lists only as a point (no footprint). */
+function readUcsdPoints(): { name: string; aliases: string[]; at: LngLat }[] {
+  if (!existsSync(RAW_UCSD_POINTS)) return [];
+  const data = JSON.parse(readFileSync(RAW_UCSD_POINTS, "utf8")) as GeoJSON.FeatureCollection;
+  return data.features.flatMap((f) => {
+    const name = String(f.properties?.FacilityLongName ?? "").trim();
+    if (!name || f.geometry?.type !== "Point") return [];
+    return [{ name, aliases: splitAliases(f.properties?.BuildingAliases, name), at: f.geometry.coordinates as LngLat }];
+  });
+}
+
+function splitAliases(value: unknown, name: string): string[] {
+  return String(value ?? "")
+    .split("|")
+    .map((a) => a.trim())
+    .filter((a) => a && a !== name && !/^\d+$/.test(a));
+}
+
+/** UCSD's building footprints with their names and aliases (bare numbers like "5" dropped). */
+function readUcsdBuildings(): { id: number; name: string; aliases: string[]; lines: LngLat[][]; center: LngLat }[] {
+  if (!existsSync(RAW_UCSD)) return [];
+  const data = JSON.parse(readFileSync(RAW_UCSD, "utf8")) as GeoJSON.FeatureCollection;
+  return data.features.flatMap((f) => {
+    const name = String(f.properties?.FacilityLongName ?? "").trim();
+    const g = f.geometry;
+    if (!name || !g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) return [];
+    const polys = g.type === "Polygon" ? [g.coordinates] : g.coordinates;
+    const lines = polys.map((rings) => rings[0] as LngLat[]);
+    const pts = lines.flat();
+    const center: LngLat = [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length];
+    const aliases = splitAliases(f.properties?.BuildingAliases, name);
+    return [{ id: Number(f.properties?.OBJECTID ?? 0), name, aliases, lines, center }];
+  });
 }
 
 async function fetchFeed(feed: Feed, path: string): Promise<void> {
@@ -878,6 +1018,16 @@ function densify(line: LngLat[], stepMeters: number): LngLat[] {
   }
   if (line.length) out.push(line[line.length - 1]);
   return out;
+}
+
+/** Area of a ring in square meters (flat approximation, fine at building scale). */
+function ringArea(ring: LngLat[]): number {
+  const lat0 = ((ring[0]?.[1] ?? 0) * Math.PI) / 180;
+  const mx = 111_320 * Math.cos(lat0);
+  const my = 110_574;
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += ring[j][0] * mx * (ring[i][1] * my) - ring[i][0] * mx * (ring[j][1] * my);
+  return Math.abs(a / 2);
 }
 
 function pointInRing(p: LngLat, ring: LngLat[]): boolean {
