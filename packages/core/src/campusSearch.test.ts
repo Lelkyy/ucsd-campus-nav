@@ -12,6 +12,8 @@ const places: Place[] = [
   { id: "stop-revelle", name: "Revelle College", aliases: [], points: [[0, 0]], kind: "stop" },
 ];
 const courses: CourseSections[] = [
+  { code: "CSE 5", title: "Introduction to Programming in R", meetings: [["A00", "LE", "C", "MWF", "", "1300", "1350", "CENTR", "101"]] },
+  { code: "CSE 599", title: "Teaching Methods", meetings: [["A00", "LE", "C", "M", "", "1500", "1550", "EBU3B", "1202"]] },
   { code: "CSE 11", title: "Accelerated Intro to Programming", meetings: [["A00", "LE", "C", "TuTh", "", "1100", "1220", "CENTR", "115"]] },
   { code: "CSE 12", title: "Basic Data Structures", meetings: [["A00", "LE", "C", "MWF", "", "0900", "0950", "WLH", "2001"]] },
   { code: "MATH 20C", title: "Calculus and Analytic Geometry", meetings: [["A00", "LE", "C", "MWF", "", "1000", "1050", "PCYNH", "109"]] },
@@ -121,10 +123,20 @@ describe("CampusSearch", () => {
     expect(search.search("data structures").some((h) => h.kind === "course" && h.course.code === "CSE 12")).toBe(true);
   });
 
+  it("reads course numbers with leading zeros", () => {
+    for (const q of ["cse005", "CSE 005", "cse-005", "CSE 05", "cse5"]) expect(first(q), q).toBe("course CSE 5");
+    expect(first("cse011")).toBe("course CSE 11");
+    // Padded means that exact number: no CSE 50-something.
+    expect(search.search("cse005").filter((h) => h.kind === "course").map((h) => h.kind === "course" && h.course.code)).toEqual(["CSE 5"]);
+    expect(first("math020c")).toBe("course MATH 20C");
+    expect(first("MATH 020C")).toBe("course MATH 20C");
+  });
+
   it("puts your own classes first", () => {
     const wlh = buildings.find((b) => b.name === "Warren Lecture Hall")!;
     const mine: ClassMeeting[] = [{ id: "1", course: "CSE 12", type: "LE", buildingId: wlh.id, buildingCode: "WLH", room: "2001", days: ["M"], start: "09:00" }];
     expect(label(search.search("cse 12", { classes: mine })[0])).toBe("class CSE 12");
+    expect(label(search.search("cse012", { classes: mine })[0])).toBe("class CSE 12");
   });
 
   it("finds student place names", () => {

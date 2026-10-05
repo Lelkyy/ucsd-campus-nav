@@ -1,7 +1,7 @@
 import MiniSearch from "minisearch";
 import { roomFloor, type FloorGuess } from "./indoor.ts";
 import type { ClassMeeting } from "./schedule.ts";
-import { expandMeeting, type CourseSections } from "./sections.ts";
+import { courseKey, expandMeeting, type CourseSections } from "./sections.ts";
 import type { Building, IndoorData, Place } from "./types.ts";
 
 /** One suggestion in the search box. */
@@ -32,8 +32,8 @@ export interface SearchSources {
 const ROOM_NUMBER = /^[A-Z]{0,2}\d{1,4}[A-Z]{0,2}\d{0,3}$/;
 /** Words people put around a room number: "WLH room 2001", "rm 115". */
 const ROOM_WORDS = new Set(["room", "rm", "rms", "rooms"]);
-/** A course code: "CSE 11", "math20c", "MAE 3". */
-const COURSE = /^([a-z]{2,5})\s*(\d{1,3}[a-z]{0,2})$/i;
+/** A course code: "CSE 11", "math20c", "MAE 3", "cse005", "CSE-005". */
+const COURSE = /^([a-z]{2,5})[\s-]*(\d{1,4}[a-z]{0,2})$/i;
 
 /**
  * The campus search: buildings by name, code ("WLH", "CSE") and nickname, with
@@ -212,13 +212,13 @@ export class CampusSearch {
   }
 
   private classHits(q: string, classes: ClassMeeting[]): SearchHit[] {
-    const want = compact(q);
+    const want = courseKey(q);
     if (want.length < 2) return [];
     const out: SearchHit[] = [];
     const seen = new Set<string>();
     for (const m of classes) {
       const b = this.byId.get(m.buildingId);
-      if (!b || !compact(m.course).startsWith(want) || m.date) continue;
+      if (!b || !courseKey(m.course).startsWith(want) || m.date) continue;
       const key = `${m.course}|${m.buildingId}|${m.room ?? ""}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -230,15 +230,18 @@ export class CampusSearch {
   private courseHits(q: string, titleOnly = false): SearchHit[] {
     const courses = this.sources.courses ?? [];
     if (!courses.length) return [];
-    const want = compact(q);
+    const want = courseKey(q);
+    // A zero-padded number ("cse005") is complete: CSE 5, not CSE 50 or 599 (but still CSE 8A for "cse008").
+    const padded = /^[a-z]+[\s-]*0\d{2}$/i.test(q.trim());
     const words = normalize(q).split(" ").filter(Boolean);
     const scored: { c: CourseSections; score: number }[] = [];
     for (const c of courses) {
-      const code = compact(c.code);
+      const code = courseKey(c.code);
       const title = normalize(c.title);
       let score = 0;
       if (!titleOnly && code === want) score = 100;
-      else if (!titleOnly && code.startsWith(want) && want.length >= 3) score = 80 - (code.length - want.length);
+      else if (!titleOnly && code.startsWith(want) && want.length >= 3 && (!padded || /^[A-Z]/.test(code.slice(want.length))))
+        score = 80 - (code.length - want.length);
       // Titles: every word starts a title word, and enough was typed to mean it ("calculus", not "data").
       else if (words.join("").length >= 6 && words.every((w) => title.split(" ").some((t) => t.startsWith(w)))) score = 30;
       if (score) scored.push({ c, score });
@@ -323,8 +326,4 @@ function normalize(s: string): string {
     .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-}
-
-function compact(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }

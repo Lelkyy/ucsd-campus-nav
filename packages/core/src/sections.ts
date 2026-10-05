@@ -88,15 +88,26 @@ export function formatCourseCode(code: string): string {
   return `${dept} ${num.replace(/^0+(?=\d)/, "")}`.trim();
 }
 
-/** Find courses by code ("cse 12", "CSE12") or title words. */
+/**
+ * A course code for comparing, however it's typed: "CSE 5", "cse5", "CSE 005",
+ * "cse-005" -> "CSE5"; "math020c" -> "MATH20C". Zeros right after the subject
+ * are dropped, so "cse00" is just "CSE" (every CSE course).
+ */
+export function courseKey(code: string): string {
+  return code
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .replace(/^([A-Z]+)0+(?=\d|$)/, "$1");
+}
+
+/** Find courses by code ("cse 12", "CSE12", "cse012") or title words. */
 export function searchCourses(courses: CourseSections[], query: string, limit = 8): CourseSections[] {
   const q = query.toLowerCase().replace(/\s+/g, " ").trim();
   if (!q) return [];
-  const compact = q.replace(/[\s-]/g, "");
+  const compact = courseKey(q);
   const scored: { c: CourseSections; score: number }[] = [];
   for (const c of courses) {
-    const code = c.code.toLowerCase();
-    const codeCompact = code.replace(/\s/g, "");
+    const codeCompact = courseKey(c.code);
     let score = 0;
     if (codeCompact === compact) score = 100;
     else if (codeCompact.startsWith(compact)) score = 80 - (codeCompact.length - compact.length);

@@ -119,6 +119,7 @@ describe("sections", () => {
     expect(formatCourseCode("CSE-012")).toBe("CSE 12");
     expect(formatCourseCode("AWP-004B")).toBe("AWP 4B");
     expect(searchCourses([cse12], "cse12")[0].code).toBe("CSE 12");
+    expect(searchCourses([cse12], "CSE 012")[0].code).toBe("CSE 12");
     expect(searchCourses([cse12], "data struct")[0].code).toBe("CSE 12");
   });
 });

@@ -141,7 +141,9 @@ pointer (see Room pointers above).
   number nobody's class uses is still offered (marked "not a listed classroom").
   Numbers are never typo-matched;
 - courses ("CSE 11", "math20c", or a title like "data structures") at their
-  lecture's room, and your own classes first;
+  lecture's room, and your own classes first. Leading zeros are fine
+  (`courseKey`): "cse005", "CSE 005", "cse-005" are CSE 5, and a zero-padded
+  number is taken as complete (CSE 5, not CSE 599; "cse008" still gives CSE 8A);
 - student place names, your saved places, then shuttle stops.
 
 Empty, the box offers your location (start field), your classes and recent
