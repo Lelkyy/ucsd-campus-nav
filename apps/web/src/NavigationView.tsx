@@ -184,7 +184,7 @@ export function NavigationView({ route, steps, destination, arrival, onNear, onP
         {(gps === "denied" || gps === "unavailable") && !simulating && (
           <p className="note warn-note">
             {gps === "denied" ? "Location access is off" : "Can't get your location"}, so use Next and Back to step through the
-            directions.
+            directions, or Simulate to watch the walk.
           </p>
         )}
 
@@ -199,7 +199,8 @@ export function NavigationView({ route, steps, destination, arrival, onNear, onP
             <input type="checkbox" checked={voice} onChange={(e) => setVoice(e.target.checked)} />
             Voice
           </label>
-          {import.meta.env.DEV && (
+          {/* Without GPS (or while developing), walk the route on screen instead. */}
+          {(import.meta.env.DEV || gps !== "ok" || simulating) && (
             <button onClick={() => setSimulating((s) => !s)}>{simulating ? "Stop simulation" : "Simulate"}</button>
           )}
         </div>

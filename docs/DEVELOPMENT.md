@@ -71,7 +71,8 @@ Ask Leonid for the files. Don't commit them or the generated
   Library Walk. Stairs and "walk your bike" stretches over 25 m are called out.
 - `nav.ts` (`RouteTracker`) snaps GPS fixes to the route. Off the route by 35 m
   twice in a row re-routes from where you are; within 15 m of the end is arrival.
-  In dev, **Simulate** walks the route without GPS.
+  **Simulate** walks the route on screen (6x speed); it shows in dev and whenever
+  there's no GPS fix.
 - `indoor.ts`: routes skip emergency exits, step-free routes prefer doors tagged
   `wheelchair=yes`, and a room mapped indoors pulls the route to the nearest door.
   Floors come from mapped rooms (`indoor=room` + `level`) when available,
