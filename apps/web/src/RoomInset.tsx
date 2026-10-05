@@ -13,8 +13,10 @@ interface Props {
   indoorRooms?: IndoorRoom[];
   /** The door the route uses, if known. */
   door?: Entrance;
-  /** Open the inside view (only when there's a mapped way to the room). */
+  /** Open the inside view. */
   onOpenInside?: () => void;
+  /** The inside view shows the way to the room (its hallways are mapped). */
+  fullInside?: boolean;
   /** Show the room on the map. */
   onShowRoom?: () => void;
   /** Mark where the room is, when it isn't mapped. */
@@ -28,7 +30,7 @@ interface Props {
  * building's walls, the room's floor (when mapped) and the room itself.
  * Nothing is drawn for a room nobody has mapped or pinned.
  */
-export function RoomInset({ building, room, mapped, indoorRooms, door, onOpenInside, onShowRoom, onPinRoom, onHeight }: Props) {
+export function RoomInset({ building, room, mapped, indoorRooms, door, onOpenInside, fullInside, onShowRoom, onPinRoom, onHeight }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = ref.current;
@@ -92,8 +94,8 @@ export function RoomInset({ building, room, mapped, indoorRooms, door, onOpenIns
         <button
           className="inset-draw"
           onClick={onOpenInside ?? onShowRoom}
-          aria-label={onOpenInside ? `Show the way to ${room} inside` : `Show ${room} on the map`}
-          title={onOpenInside ? "Show the way inside" : "Show on the map"}
+          aria-label={onOpenInside ? `Open the inside view of ${building.name}` : `Show ${room} on the map`}
+          title={onOpenInside ? "Open the inside view" : "Show on the map"}
         >
           {drawing}
         </button>
@@ -108,12 +110,17 @@ export function RoomInset({ building, room, mapped, indoorRooms, door, onOpenIns
               </button>
             </>
           )}
+          {onOpenInside && (
+            <button className="link inset-inside" onClick={onOpenInside}>
+              Inside view ›
+            </button>
+          )}
         </p>
       )}
       {drawing && (mapped?.source === "pinned" || onOpenInside) && (
         <div className="inset-foot muted">
           <span>{mapped?.source === "pinned" ? "Pinned by a student" : ""}</span>
-          {onOpenInside && <span className="inset-cta">Way inside ›</span>}
+          {onOpenInside && <span className="inset-cta">{fullInside ? "Way inside ›" : "Inside view ›"}</span>}
         </div>
       )}
     </div>

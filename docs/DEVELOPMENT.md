@@ -96,7 +96,8 @@ Ask Leonid for the files. Don't commit them or the generated
   lobbies, stairwells/elevators (`stairs=yes`, `room=stairs`, `highway=elevator`,
   `room=elevator` with a multi-floor `level`, which also join floors), and the
   target room; other rooms are walls. Step-free trips use elevators only. It
-  returns null (and the app shows no inside view or map floor plan) when the room
+  returns null (and the app falls back to the basic inside view, with no map
+  floor plan) when the room
   has no outline, its floor has no mapped corridor, the door is more than 6 m from
   mapped space, or nothing connects them. In CSE, floors 2–4 have rooms but no
   corridors, so only ground-floor and basement rooms get a route.
@@ -105,10 +106,17 @@ Ask Leonid for the files. Don't commit them or the generated
   floor (mapped rooms), or its spot (student pins). Unmapped rooms get text only:
   the floor from the room number and "Pin it". Tapping the drawing opens the
   inside view when there's a mapped way, else zooms the map to the room.
-- **Inside view** (`BuildingView.tsx`): draws the floor plan to scale with the
-  route; a dot walks it and the view switches floors at the stairs/elevator
-  ("Take the stairs down to basement"), with Replay. During navigation it opens
-  once when you're within 60 m of the end (or step to the last instruction).
+- **Inside view**, for every destination building with known walls. During
+  navigation it opens once when you're within 60 m of the end (or step to the
+  last instruction).
+  - Hallways mapped (`BuildingView.tsx`): the floor plan to scale with the
+    route; a dot walks it and the view switches floors at the stairs/elevator
+    ("Take the stairs down to basement"), with Replay.
+  - Not mapped (`InsideBasic.tsx`): only what's known is drawn (walls, doors
+    and the one the route uses, elevators, a student's room pin), with written
+    steps: the door, the floor (from the room number, labelled as such) and
+    whether there's an elevator. No hallways or indoor route are drawn, and the
+    map shows no floor plan.
 - **Room pins:** for every other building, students can "Pin this room": tap its
   spot, pick the floor. It's saved on their device right away and emailed to the
   map team as an entry for `data/room-locations.json` (`"CODE ROOM": { at, level }`),

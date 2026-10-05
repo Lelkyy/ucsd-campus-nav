@@ -30,10 +30,11 @@ the way, using the paths, stairs and bike paths students actually use.
   course, can speak instructions, and keeps the screen on.
 - **Inside the building:** which door to use, which floor, elevators, and the
   exact room, pinned by students where the building isn't mapped indoors ("Pin this
-  room"). Where the corridors are mapped (CSE's ground floor and basement today),
-  an inside view walks you from the door to the room, animating the stairs or
-  elevator between floors, and opens by itself as you reach the building. Floors
-  without mapped corridors get no drawing rather than a guessed one.
+  room"). Every destination building gets an inside view that opens as you reach
+  it: where the corridors are mapped (CSE's ground floor and basement today) it
+  walks you from the door to the room, animating the stairs or elevator between
+  floors; elsewhere it shows the walls, your door and the elevators, with the
+  floor and written steps, and never a guessed hallway.
 - **Student place names:** search "Revelle bus stop", "GTC" and other names
   students use. Name any spot yourself, and suggest names for everyone.
 - **Report a problem:** tap the spot on the map, pick what's wrong, and send it
