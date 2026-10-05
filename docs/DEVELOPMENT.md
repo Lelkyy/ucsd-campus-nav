@@ -93,10 +93,9 @@ Ask Leonid for the files. Don't commit them or the generated
   mapping (CSE, Cala) or a student's pin, else the room number, marked "going by
   the room number". It's shown in the arrival card and, whenever the destination
   is a room, in the map's top-right corner (`RoomPointer.tsx`).
-- **Room pins:** students can "Pin this room": tap its
-  spot, pick the floor. It's saved on their device right away and emailed to the
-  map team as an entry for `data/room-locations.json` (`"CODE ROOM": { at, level }`),
-  which the build adds for everyone.
+- **Room pins:** the build still reads `data/room-locations.json`
+  (`"CODE ROOM": { at, level }`) for rooms placed by hand; the in-app pinning
+  flow was removed.
 - Getting exact rooms everywhere needs either indoor mapping in OSM (from
   sources OSM allows) or UCSD's floor plans, which sit behind the Facilities
   Information System and need Facilities' permission. Entrances (`entrance=main`,
@@ -146,6 +145,15 @@ the pick is kept per day in `localStorage` (`campus-nav:conflict-choices`). The
 walks between classes follow your picks, and while the Day view is open the map
 shows them (dotted, in the next class's color) with a numbered pin per building
 ("1, 4" when two classes share one) instead of the current route.
+
+## Design
+
+Palette "Evergreen Dreams" (deep olive #595E48, sage #919682, light sage
+#C7CDBF, clay #C7A491, blush #EECFCA): CSS custom properties in `styles.css`
+(light and dark), and `palette.ts` for the map and course colors. The base map
+is recolored to match on load (`tintBaseMap`: linen ground, sage parks, clay
+major roads), and its lowest-rank point icons are hidden to keep campus clean.
+Type: Fraunces for headings, DM Sans for everything else (Google Fonts).
 
 ## Map stops
 

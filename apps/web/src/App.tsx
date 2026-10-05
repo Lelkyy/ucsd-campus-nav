@@ -28,15 +28,17 @@ import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { BuildingSearch } from "./BuildingSearch.tsx";
 import { loadCampus, storage, type CampusData } from "./data.ts";
 import { Itinerary, formatDistance, formatTime } from "./Itinerary.tsx";
-import { KIND_COLORS, MapView, type DayOverlay, type RouteLine } from "./MapView.tsx";
+import { PALETTE } from "./palette.ts";
+import { MapView, type DayOverlay, type RouteLine } from "./MapView.tsx";
 import {
   BikeIcon,
   BusIcon,
   ChevronIcon,
   CloseIcon,
+  FlagIcon,
   HomeIcon,
+  StarIcon,
   LocateIcon,
-  PathsIcon,
   SatelliteIcon,
   StepFreeIcon,
   SwapIcon,
@@ -48,9 +50,7 @@ import { NavigationView } from "./NavigationView.tsx";
 import type { DirectionsOptions } from "./DayView.tsx";
 import { TimingControl, type TimingState } from "./TimingControl.tsx";
 import { TransitPanel } from "./TransitPanel.tsx";
-import { PinRoomForm } from "./PinRoomForm.tsx";
 import { PlaceNamer } from "./PlaceNamer.tsx";
-import { useRoomPins } from "./useRoomPins.ts";
 import { ReportPanel, type RouteContext } from "./ReportPanel.tsx";
 import { HOME_ID, useSavedPlaces } from "./useSavedPlaces.ts";
 import { NextUp, SchedulePanel, type ScheduleView } from "./SchedulePanel.tsx";
@@ -58,7 +58,7 @@ import { useSchedule } from "./useSchedule.ts";
 
 /** Suggest transit while walking only when it saves at least this much time. */
 const SUGGEST_MIN_FASTER = 3;
-const BIKE_COLOR = "#16a34a";
+const BIKE_COLOR = PALETTE.sageDeep;
 const MODE_ICONS: Record<ModeId, () => JSX.Element> = { walk: WalkIcon, accessible: StepFreeIcon, bike: BikeIcon, bus: BusIcon };
 
 type Tab = "go" | "schedule" | "report";
@@ -69,36 +69,20 @@ export function App() {
   const [tab, setTab] = useState<Tab>("go");
   const schedule = useSchedule();
   const saved = useSavedPlaces();
-  const roomPins = useRoomPins();
-  /** Pinning where a room is ("Pin this room"): which room, and the spot tapped. */
-  const [pinning, setPinning] = useState<{ key: string } | null>(null);
-  const [pinAt, setPinAt] = useState<LngLat | null>(null);
-  /** Floor shown on the destination's floor plan (null = the room's floor), and camera moves. */
+  /** Camera moves ("Show it on the map"). */
   const [focus, setFocus] = useState<{ at: LngLat; zoom: number; key: number } | null>(null);
-  /** The drawn inside view of the destination building is open. */
   /** Height of the room pointer in the map's corner, so the map buttons sit below it. */
   const [insetHeight, setInsetHeight] = useState(0);
+  /** The "Save place" form under a route is open. */
+  const [naming, setNaming] = useState(false);
   /** Saving your home: which field asked (it gets Home once you tap the map). */
   const [settingHome, setSettingHome] = useState<"from" | "to" | null>(null);
   /** The day view's walks and classes, drawn on the map while it's open. */
   const [dayOverlay, setDayOverlay] = useState<DayOverlay | null>(null);
   const [scheduleView, setScheduleView] = useState<ScheduleView>(() => storage.get<ScheduleView>("campus-nav:schedule-view", "day"));
   useEffect(() => storage.set("campus-nav:schedule-view", scheduleView), [scheduleView]);
-  /** Indoor maps plus rooms pinned on this device (pins win over guesses). */
-  const indoor = useMemo<IndoorData>(() => {
-    if (!data) return {};
-    const merged: IndoorData = { ...data.indoor };
-    for (const [key, pin] of Object.entries(roomPins.pins)) {
-      const [code, ...rest] = key.split(" ");
-      const building = data.buildingByCode.get(code) ?? data.buildingById.get(code);
-      if (!building) continue;
-      merged[building.id] = [
-        ...(merged[building.id] ?? []),
-        { ref: rest.join(" "), level: pin.level, center: pin.at, kind: "room", source: "pinned", name: pin.note },
-      ];
-    }
-    return merged;
-  }, [data, roomPins.pins]);
+  /** Rooms mapped indoors (CSE, Cala), for floors and room spots. */
+  const indoor = useMemo<IndoorData>(() => data?.indoor ?? {}, [data]);
   /** Live turn-by-turn navigation, and your position while it's running. */
   const [navigating, setNavigating] = useState(false);
   const [userPos, setUserPos] = useState<LngLat | null>(null);
@@ -125,7 +109,6 @@ export function App() {
   const [locating, setLocating] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
 
-  const [showNetwork, setShowNetwork] = useState(false);
   /** Phones: the panel is a bottom sheet that can be pulled up. */
   const [sheetOpen, setSheetOpen] = useState(false);
   const [showSatellite, setShowSatellite] = useState(false);
@@ -216,14 +199,20 @@ export function App() {
       ? { ok: false, error: transitResult.error }
       : null;
 
-  const walkPlan = useMemo(() => (from && to ? planFor("walk", from, to, arriveBy?.at, departAt) : null), [planFor, from, to, arriveBy?.at, departAt]);
+  const walkPlan = useMemo(
+    () => (from && to ? planFor("walk", from, to, arriveBy?.at, departAt) : null),
+    [planFor, from, to, arriveBy?.at, departAt],
+  );
   // "No stairs" is only offered when a step-free route exists.
   const stepFreePlan = useMemo(
     () => (from && to ? planFor("accessible", from, to, arriveBy?.at, departAt) : null),
     [planFor, from, to, arriveBy?.at, departAt],
   );
   const noStairsUnavailable = stepFreePlan && !stepFreePlan.ok ? "Every route there has stairs." : null;
-  const bikePlan = useMemo(() => (from && to ? planFor("bike", from, to, arriveBy?.at, departAt) : null), [planFor, from, to, arriveBy?.at, departAt]);
+  const bikePlan = useMemo(
+    () => (from && to ? planFor("bike", from, to, arriveBy?.at, departAt) : null),
+    [planFor, from, to, arriveBy?.at, departAt],
+  );
 
   /** Each mode's option for this trip: its plan, or why it isn't offered. */
   const options: Record<ModeId, { plan: Plan | null; unavailable: string | null }> = {
@@ -296,22 +285,15 @@ export function App() {
   const steps = useMemo(() => (data && route && to ? buildSteps(data.graph, route, endpointLabel(to)) : []), [data, route, to]);
   const destBuilding = to?.kind === "building" ? to.building : null;
   const inside = useMemo(
-    () => (data && destBuilding && route ? insideHints(destBuilding, to?.kind === "building" ? to.room : undefined, indoor[destBuilding.id], route) : null),
+    () =>
+      data && destBuilding && route
+        ? insideHints(destBuilding, to?.kind === "building" ? to.room : undefined, indoor[destBuilding.id], route)
+        : null,
     [data, destBuilding, to, route, indoor],
   );
 
   const destRoom = to?.kind === "building" ? to.room : undefined;
   const destFloor = destBuilding && destRoom ? roomFloor(indoor[destBuilding.id], destRoom) : undefined;
-  const roomKey = (building: { id: string; aliases: string[] }, room: string) =>
-    `${building.aliases.find((a) => /^[A-Z0-9-]{2,6}$/.test(a)) ?? building.id} ${room}`;
-  const pinDestRoom =
-    destBuilding && destRoom
-      ? () => {
-          setPinning({ key: roomKey(destBuilding, destRoom) });
-          setPinAt(null);
-          setFocus({ at: destBuilding.center, zoom: 18.6, key: Date.now() });
-        }
-      : undefined;
   const tips = useMemo(() => {
     if (!data || !destBuilding) return [];
     const codes = destBuilding.aliases.filter((a) => /^[A-Z0-9-]{2,6}$/.test(a));
@@ -325,12 +307,7 @@ export function App() {
         hints={inside}
         stepFree={mode === "accessible"}
         tips={tips}
-        onShowRoom={
-          inside.roomAt
-            ? () => setFocus({ at: inside.roomAt!, zoom: 19.4, key: Date.now() })
-            : undefined
-        }
-        onPinRoom={pinDestRoom}
+        onShowRoom={inside.roomAt ? () => setFocus({ at: inside.roomAt!, zoom: 19.4, key: Date.now() }) : undefined}
       />
     ) : null;
 
@@ -368,6 +345,15 @@ export function App() {
     );
   };
 
+  /** Whether a destination is where your saved home is. */
+  const isHome = (e: Endpoint) => {
+    if (e.kind === "place" && e.place.id === HOME_ID) return true;
+    const h = saved.home?.points[0];
+    const p = endpointPosition(e);
+    return !!h && h[0] === p[0] && h[1] === p[1];
+  };
+  useEffect(() => setNaming(false), [to]);
+
   /** Save your home and put it in the field that asked for it. */
   const saveHome = (points: LngLat[]) => {
     const home = saved.setHome(points);
@@ -393,7 +379,6 @@ export function App() {
   const onMapClick = (p: LngLat) => {
     if (!data) return;
     if (tab === "report") return setReportPin(p);
-    if (pinning) return setPinAt(p);
     if (settingHome) return saveHome([p]);
     const pin: Endpoint = { kind: "point", lngLat: p, label: "Dropped pin" };
     if (clickTarget === "from") {
@@ -466,43 +451,39 @@ export function App() {
           showStops={!showingDay && routeStops.length > 0}
           from={from && !showingDay ? endpointPosition(from) : null}
           to={to && !showingDay ? endpointPosition(to) : null}
-          showNetwork={showNetwork}
-          bikeNetwork={mode === "bike"}
           showSatellite={showSatellite}
-          reportPin={tab === "report" ? reportPin : pinning ? pinAt : null}
-          pickingSpot={tab === "report" || !!pinning}
+          reportPin={tab === "report" ? reportPin : null}
+          pickingSpot={tab === "report"}
           focus={focus}
           userPos={navigating ? userPos : null}
           follow={navigating}
           doors={(destBuilding?.entrances ?? []).map((d) => ({ lngLat: d.lngLat, used: d === inside?.entrance }))}
-          room={inside?.roomAt && to?.kind === "building" ? { lngLat: inside.roomAt, label: `${to.room} · ${inside.floor?.label ?? ""}` } : null}
+          room={
+            inside?.roomAt && to?.kind === "building" ? { lngLat: inside.roomAt, label: `${to.room} · ${inside.floor?.label ?? ""}` } : null
+          }
           onMapClick={onMapClick}
           onLocate={setMyLocation}
         />
       )}
 
       <div className="map-tools">
-        <button className={`map-chip ${showSatellite ? "on" : ""}`} aria-pressed={showSatellite} onClick={() => setShowSatellite((v) => !v)}>
+        <button
+          className={`map-chip ${showSatellite ? "on" : ""}`}
+          aria-pressed={showSatellite}
+          onClick={() => setShowSatellite((v) => !v)}
+        >
           <SatelliteIcon /> Satellite
         </button>
-        <button className={`map-chip ${showNetwork ? "on" : ""}`} aria-pressed={showNetwork} onClick={() => setShowNetwork((v) => !v)}>
-          <PathsIcon /> Paths
-        </button>
-        {showNetwork && (
-          <div className="legend">
-            <span style={{ ["--c" as string]: KIND_COLORS[0] }}>Path</span>
-            <span style={{ ["--c" as string]: KIND_COLORS[1] }}>Stairs</span>
-            <span style={{ ["--c" as string]: KIND_COLORS[2] }}>Bike path</span>
-            <span style={{ ["--c" as string]: KIND_COLORS[6] }}>Shared path</span>
-            <span style={{ ["--c" as string]: KIND_COLORS[4] }}>Connector road</span>
-            {mode === "bike" && <span style={{ ["--c" as string]: KIND_COLORS[5] }}>Road (bikes)</span>}
-            <span style={{ ["--c" as string]: KIND_COLORS[3] }}>Hand-mapped</span>
-          </div>
-        )}
       </div>
 
-      {destBuilding && destRoom && !pinning && !showingDay && (
-        <RoomPointer key={`${destBuilding.id}-${destRoom}`} building={destBuilding} room={destRoom} floor={destFloor} onHeight={setInsetHeight} />
+      {destBuilding && destRoom && !showingDay && (
+        <RoomPointer
+          key={`${destBuilding.id}-${destRoom}`}
+          building={destBuilding}
+          room={destRoom}
+          floor={destFloor}
+          onHeight={setInsetHeight}
+        />
       )}
 
       <aside className={`sheet ${sheetOpen ? "open" : ""}`} aria-label="Directions and schedule">
@@ -511,16 +492,16 @@ export function App() {
           <ChevronIcon up={!sheetOpen} />
         </button>
         <header className="sheet-head">
-          <h1>Campus Nav</h1>
+          <h1>
+            Campus <em>Nav</em>
+          </h1>
           <nav className="tabs" aria-label="Sections" hidden={navigating}>
             <button className={tab === "go" ? "on" : ""} aria-current={tab === "go"} onClick={() => setTab("go")}>
               Directions
             </button>
             <button className={tab === "schedule" ? "on" : ""} aria-current={tab === "schedule"} onClick={() => setTab("schedule")}>
-              Schedule{schedule.meetings.length > 0 && <span className="count">{new Set(schedule.meetings.map((m) => m.course)).size}</span>}
-            </button>
-            <button className={tab === "report" ? "on" : ""} aria-current={tab === "report"} onClick={() => openReport(false)}>
-              Report
+              Schedule
+              {schedule.meetings.length > 0 && <span className="count">{new Set(schedule.meetings.map((m) => m.course)).size}</span>}
             </button>
           </nav>
         </header>
@@ -608,7 +589,13 @@ export function App() {
                   />
                 </div>
                 <div className="trip-actions">
-                  <button className="icon-btn" onClick={locate} disabled={locating} aria-label="Start from my location" title="Start from my location">
+                  <button
+                    className="icon-btn"
+                    onClick={locate}
+                    disabled={locating}
+                    aria-label="Start from my location"
+                    title="Start from my location"
+                  >
                     <LocateIcon />
                   </button>
                   <button
@@ -631,7 +618,10 @@ export function App() {
                   const Icon = MODE_ICONS[id];
                   const option = options[id];
                   const eta = option.unavailable || !option.plan?.ok ? null : Math.max(1, Math.ceil(option.plan.route.minutes));
-                  const fare = id === "bus" && eta !== null && option.plan?.ok ? tripFare(option.plan.route, data.transit.data.fares, { upass }) : null;
+                  const fare =
+                    id === "bus" && eta !== null && option.plan?.ok
+                      ? tripFare(option.plan.route, data.transit.data.fares, { upass })
+                      : null;
                   return (
                     <button
                       key={id}
@@ -674,9 +664,7 @@ export function App() {
                   </span>
                 </div>
               )}
-              {mode === "bus" && busUnavailable && (
-                <p className="note warn-note">{busUnavailable} Showing the walk.</p>
-              )}
+              {mode === "bus" && busUnavailable && <p className="note warn-note">{busUnavailable} Showing the walk.</p>}
               {mode === "bus" && !busUnavailable && transitOpts.length > 0 && data && (
                 <TransitPanel
                   options={transitOpts}
@@ -710,18 +698,6 @@ export function App() {
                   <button onClick={() => setMode("bus")}>Take it</button>
                 </div>
               )}
-              {pinning && (
-                <PinRoomForm
-                  key={pinning.key}
-                  roomKey={pinning.key}
-                  at={pinAt}
-                  onSave={(pin) => roomPins.save(pinning.key, pin)}
-                  onCancel={() => {
-                    setPinning(null);
-                    setPinAt(null);
-                  }}
-                />
-              )}
               {route && to && (
                 <>
                   <Itinerary
@@ -742,25 +718,29 @@ export function App() {
                     Start
                   </button>
                   {insideCard}
-                  <PlaceNamer
-                    key={endpointLabel(to)}
-                    at={endpointPosition(to)}
-                    defaultName={to.kind === "point" ? "" : endpointLabel(to)}
-                    onSave={(name, note) => saved.add(name, to.kind === "place" ? to.place.points : [endpointPosition(to)], note)}
-                  />
-                  {!(to.kind === "place" && to.place.id === HOME_ID) && (
-                    <p className="muted small">
-                      <button className="link" onClick={() => saved.setHome(to.kind === "place" ? to.place.points : [endpointPosition(to)])}>
-                        {saved.home ? "Make this your home instead" : "Set this as your home"}
-                      </button>
-                    </p>
-                  )}
-                  <p className="muted small">
-                    Something wrong with this route?{" "}
-                    <button className="link" onClick={() => openReport(true)}>
-                      Report it
+                  <div className="route-actions">
+                    <button onClick={() => setNaming((v) => !v)} aria-expanded={naming}>
+                      <StarIcon /> Save place
                     </button>
-                  </p>
+                    <button
+                      disabled={isHome(to)}
+                      onClick={() => saved.setHome(to.kind === "place" ? to.place.points : [endpointPosition(to)])}
+                    >
+                      <HomeIcon /> {isHome(to) ? "Your home" : "Set as home"}
+                    </button>
+                    <button onClick={() => openReport(true)}>
+                      <FlagIcon /> Report
+                    </button>
+                  </div>
+                  {naming && (
+                    <PlaceNamer
+                      key={endpointLabel(to)}
+                      at={endpointPosition(to)}
+                      defaultName={to.kind === "point" ? "" : endpointLabel(to)}
+                      onSave={(name, note) => saved.add(name, to.kind === "place" ? to.place.points : [endpointPosition(to)], note)}
+                      onClose={() => setNaming(false)}
+                    />
+                  )}
                 </>
               )}
               {!to && (saved.places.length > 0 || !saved.home) && (
@@ -786,8 +766,8 @@ export function App() {
               )}
               {!from && !to && (
                 <p className="muted small empty-hint">
-                  Pick a start and a destination (buildings, rooms like CENTR 115, or places like “Revelle bus stop”), or add
-                  your classes in Schedule.
+                  Pick a start and a destination (buildings, rooms like CENTR 115, or places like “Revelle bus stop”), or add your classes
+                  in Schedule.
                 </p>
               )}
             </>
@@ -802,19 +782,28 @@ export function App() {
               onDayOverlay={setDayOverlay}
             />
           ) : (
-            <ReportPanel
-              buildings={data.buildings}
-              pin={reportPin}
-              onClearPin={() => setReportPin(null)}
-              route={reportRoute}
-              dataDate={data.graph.data.generatedAt.slice(0, 10)}
-            />
+            <>
+              <button className="link back-link" onClick={() => setTab("go")}>
+                ‹ Back to directions
+              </button>
+              <ReportPanel
+                buildings={data.buildings}
+                pin={reportPin}
+                onClearPin={() => setReportPin(null)}
+                route={reportRoute}
+                dataDate={data.graph.data.generatedAt.slice(0, 10)}
+              />
+            </>
           )}
         </div>
 
         <footer className="sheet-foot">
-          Paths © OpenStreetMap contributors · Building names and outlines from UC San Diego's Campus Map · Schedules from Triton Transit and San Diego MTS (scheduled, not live) · Not
-          an official UC San Diego app
+          <span>© OpenStreetMap · UC San Diego Campus Map · Triton Transit &amp; MTS schedules · Unofficial</span>
+          {tab !== "report" && !navigating && (
+            <button className="link" onClick={() => openReport(false)}>
+              Report a problem
+            </button>
+          )}
         </footer>
       </aside>
     </div>

@@ -146,6 +146,18 @@ export const PinIcon = () => (
   </Icon>
 );
 
+export const StarIcon = () => (
+  <Icon width="16" height="16">
+    <path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z" />
+  </Icon>
+);
+
+export const FlagIcon = () => (
+  <Icon width="16" height="16">
+    <path d="M5 21V4M5 4h11l-2 4 2 4H5" />
+  </Icon>
+);
+
 export const HomeIcon = () => (
   <Icon width="18" height="18">
     <path d="M3.5 11L12 4l8.5 7" />

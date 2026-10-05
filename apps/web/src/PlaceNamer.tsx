@@ -2,9 +2,18 @@ import type { LngLat } from "@campus/core";
 import { useState } from "react";
 import { suggestPlaceHref } from "./useSavedPlaces.ts";
 
-/** "Name this place": save a spot under your own name, and optionally suggest it for everyone. */
-export function PlaceNamer({ at, defaultName, onSave }: { at: LngLat; defaultName?: string; onSave: (name: string, note?: string) => void }) {
-  const [open, setOpen] = useState(false);
+/** Save a spot under your own name, and optionally suggest the name for everyone. */
+export function PlaceNamer({
+  at,
+  defaultName,
+  onSave,
+  onClose,
+}: {
+  at: LngLat;
+  defaultName?: string;
+  onSave: (name: string, note?: string) => void;
+  onClose: () => void;
+}) {
   const [name, setName] = useState(defaultName ?? "");
   const [note, setNote] = useState("");
   const [saved, setSaved] = useState<string | null>(null);
@@ -17,13 +26,6 @@ export function PlaceNamer({ at, defaultName, onSave }: { at: LngLat; defaultNam
           Suggest it for everyone
         </a>
       </p>
-    );
-  }
-  if (!open) {
-    return (
-      <button className="link" onClick={() => setOpen(true)}>
-        Name this place…
-      </button>
     );
   }
   return (
@@ -48,7 +50,7 @@ export function PlaceNamer({ at, defaultName, onSave }: { at: LngLat; defaultNam
         <button type="submit" className="primary" disabled={!name.trim()}>
           Save
         </button>
-        <button type="button" onClick={() => setOpen(false)}>
+        <button type="button" onClick={onClose}>
           Cancel
         </button>
       </div>

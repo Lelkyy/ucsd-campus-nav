@@ -30,7 +30,7 @@ the way, using the paths, stairs and bike paths students actually use.
   course, can speak instructions, and keeps the screen on.
 - **Inside the building:** which door to use, whether there's an elevator, and
   roughly where the room is ("It's on the second floor"), kept in the map's
-  corner. Students can pin a room's exact spot for the next person.
+  corner.
 - **Your whole day:** see any day's classes in order, how long each walk between
   them takes and whether the gap is enough, and get directions to any class,
   from where you are or from the class before. Overlapping classes show as a
@@ -41,8 +41,8 @@ the way, using the paths, stairs and bike paths students actually use.
 - **Home:** save it once, and it's one tap from either search box.
 - **Student place names:** search "Revelle bus stop", "GTC" and other names
   students use. Name any spot yourself, and suggest names for everyone.
-- **Report a problem:** tap the spot on the map, pick what's wrong, and send it
-  by email (prefilled with the location and details).
+- **Report a problem:** from any route or the footer, tap the spot on the map,
+  pick what's wrong, and send it by email (prefilled with the location and details).
 
 ## Run it
 

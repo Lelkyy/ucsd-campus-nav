@@ -1,4 +1,4 @@
-import { EdgeKind, type CampusGraph, type LngLat, type TransitStop } from "@campus/core";
+import { type CampusGraph, type LngLat, type TransitStop } from "@campus/core";
 import {
   GeolocateControl,
   LngLatBounds,
@@ -11,9 +11,10 @@ import {
   type GeoJSONSource,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { PALETTE } from "./palette.ts";
 // MapLibre 6 derives its worker URL at runtime, which bundlers can't see; have Vite bundle it.
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const BASE_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 const SATELLITE_TILES =
@@ -23,16 +24,6 @@ const CAMPUS_CENTER: LngLat = [-117.2376, 32.8801];
 const CAMPUS_PADDING_DEG = 0.002;
 /** Roughly "whole campus on a laptop screen". */
 const MIN_ZOOM = 14;
-
-export const KIND_COLORS: Record<EdgeKind, string> = {
-  [EdgeKind.Path]: "#2f80ed",
-  [EdgeKind.Steps]: "#f2994a",
-  [EdgeKind.Bike]: "#27ae60",
-  [EdgeKind.Custom]: "#d63aff",
-  [EdgeKind.Road]: "#8a8f98",
-  [EdgeKind.BikeOnly]: "#b4bac2",
-  [EdgeKind.Shared]: "#7bd389",
-};
 
 /** One drawn piece of a route: walking (dotted blue), riding (green) or a shuttle (its route color). */
 export interface RouteLine {
@@ -62,9 +53,6 @@ export interface MapViewProps {
   showStops: boolean;
   from: LngLat | null;
   to: LngLat | null;
-  showNetwork: boolean;
-  /** Include bike-only roads in the network overlay (riding mode). */
-  bikeNetwork: boolean;
   showSatellite: boolean;
   /** A spot being reported (orange marker). */
   reportPin: LngLat | null;
@@ -122,14 +110,17 @@ export function MapView(props: MapViewProps) {
     map.addControl(new ScaleControl({ unit: "imperial" }), "bottom-right");
 
     markers.current = {
-      from: new Marker({ color: "#27ae60" }),
-      to: new Marker({ color: "#eb5757" }),
-      report: new Marker({ color: "#f59e0b" }),
+      from: new Marker({ color: PALETTE.sageDeep }),
+      to: new Marker({ color: PALETTE.rose }),
+      report: new Marker({ color: PALETTE.clay }),
       user: new Marker({ element: dotElement("user-dot") }),
       room: new Marker({ element: roomElement(roomLabel), anchor: "bottom" }),
     };
 
     map.on("load", () => {
+      tintBaseMap(map);
+      // The least important points of interest (rank 20+) crowd campus with icons; the rest stay.
+      if (map.getLayer("poi_r20")) map.setLayoutProperty("poi_r20", "visibility", "none");
       // The base map's own bus and trolley stop icons are off: the app shows only the stops a route uses.
       if (map.getLayer("poi_transit")) map.setLayoutProperty("poi_transit", "visibility", "none");
       for (const id of ["poi_r1", "poi_r7", "poi_r20"]) {
@@ -154,35 +145,15 @@ export function MapView(props: MapViewProps) {
         firstSymbol,
       );
 
-      for (const id of ["network", "route", "connectors", "stops", "doors", "day"]) {
+      for (const id of ["route", "connectors", "stops", "doors", "day"]) {
         map.addSource(id, { type: "geojson", data: EMPTY });
       }
-      map.addLayer({
-        id: "network",
-        type: "line",
-        source: "network",
-        layout: { visibility: "none", "line-cap": "round" },
-        paint: {
-          "line-color": ["get", "color"],
-          "line-width": ["interpolate", ["linear"], ["zoom"], 15, 1, 19, 3],
-          "line-opacity": 0.85,
-        },
-      });
-      map.addLayer({
-        id: "network-nodes",
-        type: "circle",
-        source: "network",
-        minzoom: 18,
-        filter: ["==", ["geometry-type"], "Point"],
-        layout: { visibility: "none" },
-        paint: { "circle-radius": 2.5, "circle-color": "#fff", "circle-stroke-color": "#2f80ed", "circle-stroke-width": 1 },
-      });
       map.addLayer({
         id: "stops",
         type: "circle",
         source: "stops",
         layout: { visibility: "none" },
-        paint: { "circle-radius": 5, "circle-color": "#fff", "circle-stroke-color": "#7b61ff", "circle-stroke-width": 2.5 },
+        paint: { "circle-radius": 5, "circle-color": PALETTE.white, "circle-stroke-color": PALETTE.oliveDeep, "circle-stroke-width": 2.5 },
       });
       map.addLayer({
         id: "stop-labels",
@@ -198,7 +169,7 @@ export function MapView(props: MapViewProps) {
           "text-anchor": "top",
           "text-max-width": 9,
         },
-        paint: { "text-color": "#4b3aa8", "text-halo-color": "#fff", "text-halo-width": 1.5 },
+        paint: { "text-color": PALETTE.oliveDeep, "text-halo-color": PALETTE.white, "text-halo-width": 1.5 },
       });
       // Walking legs are dotted; rides are solid (bike green, shuttle in the route's color).
       map.addLayer({
@@ -207,7 +178,7 @@ export function MapView(props: MapViewProps) {
         source: "route",
         filter: ["!=", ["get", "kind"], "walk"],
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#0b3d91", "line-width": 11 },
+        paint: { "line-color": PALETTE.oliveDeep, "line-width": 11 },
       });
       map.addLayer({
         id: "route",
@@ -215,7 +186,7 @@ export function MapView(props: MapViewProps) {
         source: "route",
         filter: ["==", ["get", "kind"], "walk"],
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#1a56db", "line-width": 7, "line-dasharray": [0.01, 1.6] },
+        paint: { "line-color": PALETTE.olive, "line-width": 7, "line-dasharray": [0.01, 1.6] },
       });
       map.addLayer({
         id: "route-ride",
@@ -242,7 +213,7 @@ export function MapView(props: MapViewProps) {
         paint: {
           "circle-radius": ["case", [">", ["length", ["get", "n"]], 1], 15, 11],
           "circle-color": ["get", "color"],
-          "circle-stroke-color": "#ffffff",
+          "circle-stroke-color": PALETTE.white,
           "circle-stroke-width": 2.5,
         },
       });
@@ -252,7 +223,7 @@ export function MapView(props: MapViewProps) {
         source: "day",
         filter: ["==", ["geometry-type"], "Point"],
         layout: { "text-field": ["get", "n"], "text-font": ["Noto Sans Regular"], "text-size": 11, "text-allow-overlap": true },
-        paint: { "text-color": "#ffffff" },
+        paint: { "text-color": PALETTE.white },
       });
       map.addLayer({
         id: "day-stop-label",
@@ -267,7 +238,7 @@ export function MapView(props: MapViewProps) {
           "text-anchor": "top",
           "text-optional": true,
         },
-        paint: { "text-color": "#1f2937", "text-halo-color": "#ffffff", "text-halo-width": 1.6 },
+        paint: { "text-color": PALETTE.ink, "text-halo-color": PALETTE.white, "text-halo-width": 1.6 },
       });
       map.addLayer({
         id: "doors",
@@ -276,8 +247,8 @@ export function MapView(props: MapViewProps) {
         minzoom: 16,
         paint: {
           "circle-radius": ["case", ["get", "used"], 7, 4.5],
-          "circle-color": ["case", ["get", "used"], "#16a34a", "#ffffff"],
-          "circle-stroke-color": ["case", ["get", "used"], "#ffffff", "#14532d"],
+          "circle-color": ["case", ["get", "used"], PALETTE.olive, PALETTE.white],
+          "circle-stroke-color": ["case", ["get", "used"], PALETTE.white, PALETTE.oliveDeep],
           "circle-stroke-width": 2,
         },
       });
@@ -285,7 +256,7 @@ export function MapView(props: MapViewProps) {
         id: "connectors",
         type: "line",
         source: "connectors",
-        paint: { "line-color": "#0b3d91", "line-width": 3, "line-dasharray": [1, 1.5] },
+        paint: { "line-color": PALETTE.oliveDeep, "line-width": 3, "line-dasharray": [1, 1.5] },
       });
       setReady(true);
     });
@@ -295,25 +266,14 @@ export function MapView(props: MapViewProps) {
     return () => map.remove();
   }, []);
 
-  const networkData = useMemo(() => buildNetworkGeoJson(props.graph), [props.graph]);
-
-  // Sync data and visibility into the map once it's loaded.
-  useEffect(() => {
-    if (ready) source(mapRef.current!, "network").setData(networkData);
-  }, [ready, networkData]);
-
   useEffect(() => {
     if (!ready) return;
     const map = mapRef.current!;
     const vis = (on: boolean) => (on ? "visible" : "none");
-    map.setLayoutProperty("network", "visibility", vis(props.showNetwork));
-    // Walkers only see the walking network; riders also see the roads they can use.
-    map.setFilter("network", props.bikeNetwork ? null : ["!=", ["get", "kind"], EdgeKind.BikeOnly]);
-    map.setLayoutProperty("network-nodes", "visibility", vis(props.showNetwork));
     map.setLayoutProperty("satellite", "visibility", vis(props.showSatellite));
     map.setLayoutProperty("stops", "visibility", vis(props.showStops));
     map.setLayoutProperty("stop-labels", "visibility", vis(props.showStops));
-  }, [ready, props.showNetwork, props.bikeNetwork, props.showSatellite, props.showStops]);
+  }, [ready, props.showSatellite, props.showStops]);
 
   useEffect(() => {
     if (!ready) return;
@@ -457,21 +417,36 @@ function lineFeature(coords: LngLat[]): GeoJSON.Feature<GeoJSON.LineString> {
   return { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } };
 }
 
-/** Every edge as a colored segment, plus nodes (shown when zoomed in, for tracing). */
-function buildNetworkGeoJson(graph: CampusGraph): GeoJSON.FeatureCollection {
-  const features: GeoJSON.Feature[] = [];
-  for (let e = 0; e < graph.edgeCount; e++) {
-    const a = graph.edgeFrom[e];
-    const b = graph.edgeTo[e];
-    features.push({
-      type: "Feature",
-      properties: { color: KIND_COLORS[graph.kind(e)], kind: graph.kind(e) },
-      geometry: { type: "LineString", coordinates: [graph.coord(a), graph.coord(b)] },
-    });
+/**
+ * Recolor the base map to the app's palette: warm linen ground, sage parks and
+ * grass, muted water, soft clay major roads instead of yellow, warm buildings.
+ */
+const BASE_TINTS: [RegExp, "background-color" | "fill-color" | "line-color" | "fill-extrusion-color", string][] = [
+  [/^background$/, "background-color", "#f4efe8"],
+  [/^park$/, "fill-color", "#dde3d2"],
+  [/^landcover_grass$/, "fill-color", "#d3dac5"],
+  [/^landcover_wood$/, "fill-color", "#c8d0b8"],
+  [/^landuse_(pitch|track|cemetery)$/, "fill-color", "#e1e5d6"],
+  [/^landuse_school$/, "fill-color", "#ece8dc"],
+  [/^landuse_hospital$/, "fill-color", "#f3e3de"],
+  [/^landuse_residential$/, "fill-color", "#efe9e0"],
+  [/^water$/, "fill-color", "#c3d3cf"],
+  [/^waterway_/, "line-color", "#b2c6c1"],
+  [/_casing$/, "line-color", "#d9cfc2"],
+  [/^(road|bridge|tunnel)_(motorway|motorway_link)$/, "line-color", "#e8cfbc"],
+  [/^(road|bridge|tunnel)_(trunk_primary|secondary_tertiary|link)$/, "line-color", "#f3e6d8"],
+  [/^building$/, "fill-color", "#e4ddd2"],
+  [/^building-3d$/, "fill-extrusion-color", "#e4ddd2"],
+];
+
+function tintBaseMap(map: MlMap) {
+  for (const layer of map.getStyle().layers) {
+    const tint = BASE_TINTS.find(([re]) => re.test(layer.id));
+    if (!tint) continue;
+    try {
+      map.setPaintProperty(layer.id, tint[1], tint[2]);
+    } catch {
+      // A layer of a different type than expected: leave it as the style draws it.
+    }
   }
-  for (let i = 0; i < graph.nodeCount; i++) {
-    if (graph.adjStart[i + 1] === graph.adjStart[i]) continue;
-    features.push({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: graph.coord(i) } });
-  }
-  return { type: "FeatureCollection", features };
 }

@@ -13,6 +13,7 @@ import {
   type Weekday,
 } from "@campus/core";
 import { useMemo, useRef, useState } from "react";
+import { COURSE_COLORS } from "./palette.ts";
 import { BuildingSearch } from "./BuildingSearch.tsx";
 import { DayView, type DirectionsOptions } from "./DayView.tsx";
 import type { DayOverlay } from "./MapView.tsx";
@@ -34,7 +35,7 @@ interface Props {
 }
 
 const SCHOOL_DAYS: Weekday[] = ["M", "Tu", "W", "Th", "F"];
-const COURSE_COLORS = ["#3b82f6", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
+
 
 type Adding = null | "course" | "custom";
 

@@ -8,7 +8,6 @@ export function InsideCard({
   stepFree,
   tips,
   onShowRoom,
-  onPinRoom,
 }: {
   buildingName: string;
   hints: InsideHints;
@@ -16,8 +15,6 @@ export function InsideCard({
   tips: string[];
   /** Zoom the map to the room's spot. */
   onShowRoom?: () => void;
-  /** Start marking where an unmapped room is. */
-  onPinRoom?: () => void;
 }) {
   const rows: [string, ReactNode][] = [];
   if (hints.enterBy) rows.push(["Enter", <>Use {hints.enterBy}.</>]);
@@ -35,16 +32,10 @@ export function InsideCard({
         ) : (
           <>Look for {hints.room} once inside.</>
         )}{" "}
-        {onShowRoom ? (
+        {onShowRoom && (
           <button className="link" onClick={onShowRoom}>
             Show it on the map
           </button>
-        ) : (
-          onPinRoom && (
-            <button className="link" onClick={onPinRoom}>
-              Pin this room
-            </button>
-          )
         )}
       </>,
     ]);
