@@ -87,37 +87,13 @@ Ask Leonid for the files. Don't commit them or the generated
   `wheelchair=yes`, and a room mapped indoors pulls the route to the nearest door.
   Floors come from mapped rooms (`indoor=room` + `level`) when available,
   otherwise from the room number (first digit; `B…` is basement), labelled as a guess.
-- **Floor plans:** where OSM has indoor rooms/corridors (`indoor=room|corridor|area`
-  with `level`), the map draws that floor and highlights the destination room,
-  with a floor switcher. OSM's level 0 is the ground floor, shown as "Floor 1".
-  Today that's the CSE building (EBU3B, ~370 spaces) and the Cala residence.
-- **Indoor routes** (`indoorRoute.ts`): A* on a 0.5 m grid over each floor,
-  from the door the outdoor route uses to the room. Walkable: corridors, areas,
-  lobbies, stairwells/elevators (`stairs=yes`, `room=stairs`, `highway=elevator`,
-  `room=elevator` with a multi-floor `level`, which also join floors), and the
-  target room; other rooms are walls. Step-free trips use elevators only. It
-  returns null (and the app falls back to the basic inside view, with no map
-  floor plan) when the room
-  has no outline, its floor has no mapped corridor, the door is more than 6 m from
-  mapped space, or nothing connects them. In CSE, floors 2–4 have rooms but no
-  corridors, so only ground-floor and basement rooms get a route.
-- **Room card** (`RoomInset.tsx`): whenever the destination is a room, the map's
-  top-right corner shows the building's walls with the room highlighted on its
-  floor (mapped rooms), or its spot (student pins). Unmapped rooms get text only:
-  the floor from the room number and "Pin it". Tapping the drawing opens the
-  inside view when there's a mapped way, else zooms the map to the room.
-- **Inside view**, for every destination building with known walls. During
-  navigation it opens once when you're within 60 m of the end (or step to the
-  last instruction).
-  - Hallways mapped (`BuildingView.tsx`): the floor plan to scale with the
-    route; a dot walks it and the view switches floors at the stairs/elevator
-    ("Take the stairs down to basement"), with Replay.
-  - Not mapped (`InsideBasic.tsx`): only what's known is drawn (walls, doors
-    and the one the route uses, elevators, a student's room pin), with written
-    steps: the door, the floor (from the room number, labelled as such) and
-    whether there's an elevator. No hallways or indoor route are drawn, and the
-    map shows no floor plan.
-- **Room pins:** for every other building, students can "Pin this room": tap its
+- **Room pointers:** no floor drawings; the app says roughly where a room is:
+  "It's on the second floor" (`floorPhrase`, US floors: OSM level 0 is the first
+  floor, negative levels are the basement). The floor comes from OSM indoor
+  mapping (CSE, Cala) or a student's pin, else the room number, marked "going by
+  the room number". It's shown in the arrival card and, whenever the destination
+  is a room, in the map's top-right corner (`RoomPointer.tsx`).
+- **Room pins:** students can "Pin this room": tap its
   spot, pick the floor. It's saved on their device right away and emailed to the
   map team as an entry for `data/room-locations.json` (`"CODE ROOM": { at, level }`),
   which the build adds for everyone.
@@ -146,8 +122,24 @@ wrong one sends students to the wrong building. `npm test` fails if a code with
 classes isn't accounted for.
 
 Rooms come from `data/rooms.json` (2025–26, public schedule) plus the private
-Fall 2026 file. Routing goes to the building's door; inside, only buildings with
-mapped corridors get a route to the room (see Floor plans above).
+Fall 2026 file. Routing goes to the building's door, and the room gets a floor
+pointer (see Room pointers above).
+
+## Search
+
+`CampusSearch` (`packages/core/src/campusSearch.ts`, on
+[MiniSearch](https://github.com/lucaong/minisearch)) backs the From/To boxes:
+
+- buildings by name, code ("WLH", "CSE", "HDSI") and nickname or old name, with
+  partial words ("warren lec") and typos ("giesel") forgiven;
+- rooms in any form: "WLH 2001", "wlh2001", "2001 WLH", "warren lecture hall
+  2001", and "WLH 20" lists the rooms classes meet in that start with 20;
+- courses ("CSE 11", "math20c", or a title like "data structures") at their
+  lecture's room, and your own classes first;
+- student place names, your saved places, then shuttle stops.
+
+Empty, the box offers your location (start field), your classes and recent
+picks (kept in `localStorage`). It's a keyboard combobox (arrows, Enter, Esc).
 
 ## Fixing the map
 

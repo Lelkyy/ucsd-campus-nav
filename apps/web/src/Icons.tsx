@@ -117,3 +117,38 @@ export const TrolleyIcon = () => (
     <circle cx="15" cy="15" r=".6" fill="currentColor" />
   </Icon>
 );
+
+export const BuildingIcon = () => (
+  <Icon width="18" height="18">
+    <path d="M4 21V5.5L12 3l8 2.5V21" />
+    <path d="M9 21v-4h6v4M8 8h1M12 8h1M16 8h-1M8 12h1M12 12h1M16 12h-1" />
+  </Icon>
+);
+
+export const DoorIcon = () => (
+  <Icon width="18" height="18">
+    <path d="M5 21h14M7 21V3.5h10V21" />
+    <circle cx="14" cy="12.5" r=".7" fill="currentColor" />
+  </Icon>
+);
+
+export const BookIcon = () => (
+  <Icon width="18" height="18">
+    <path d="M4.5 5.5c2.5-1.3 5-1.3 7.5 0v14c-2.5-1.3-5-1.3-7.5 0z" />
+    <path d="M19.5 5.5c-2.5-1.3-5-1.3-7.5 0v14c2.5-1.3 5-1.3 7.5 0z" />
+  </Icon>
+);
+
+export const PinIcon = () => (
+  <Icon width="18" height="18">
+    <path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z" />
+    <circle cx="12" cy="10" r="2.3" />
+  </Icon>
+);
+
+export const SearchIcon = () => (
+  <Icon width="18" height="18">
+    <circle cx="10.5" cy="10.5" r="6" />
+    <path d="M15 15l5 5" />
+  </Icon>
+);

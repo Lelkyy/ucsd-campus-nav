@@ -42,6 +42,26 @@ export function floorToLevel(floor: string): number {
   return Math.max(0, Number(floor) - 1);
 }
 
+/** Which floor a room is on: from the floor plan or a student's pin, else its number. */
+export function roomFloor(indoorRooms: IndoorRoom[] | undefined, room: string): FloorGuess | undefined {
+  const mapped = findRoom(indoorRooms, room);
+  if (mapped?.level !== undefined) {
+    return { floor: mapped.level, label: levelLabel(mapped.level), source: mapped.source === "pinned" ? "pinned" : "map" };
+  }
+  return floorFromRoom(room) ?? undefined;
+}
+
+const ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
+
+/** A rough pointer to a floor, US style: "on the first floor", "in the basement". */
+export function floorPhrase(floor: FloorGuess): string {
+  // Guesses from room numbers are US floors ("2", "B"); mapped ones are OSM levels (ground = 0).
+  const level = floor.source === "number" ? floorToLevel(floor.floor) : Number(floor.floor.split(";")[0]);
+  if (!Number.isFinite(level)) return `on ${floor.label.toLowerCase()}`;
+  if (level < 0) return level === -1 ? "in the basement" : `on basement level ${-level}`;
+  return `on the ${ORDINALS[level] ?? `${level + 1}th`} floor`;
+}
+
 export interface InsideHints {
   room?: string;
   floor?: FloorGuess;
@@ -63,11 +83,8 @@ export function insideHints(building: Building, room: string | undefined, indoor
   if (mapped) {
     hints.roomAt = mapped.center;
     hints.mappedRoom = mapped;
-    if (mapped.level !== undefined) {
-      hints.floor = { floor: mapped.level, label: levelLabel(mapped.level), source: mapped.source === "pinned" ? "pinned" : "map" };
-    }
   }
-  if (!hints.floor && room) hints.floor = floorFromRoom(room) ?? undefined;
+  if (room) hints.floor = roomFloor(indoorRooms, room);
 
   const end = route?.legs[route.legs.length - 1];
   const lastNode = end && end.mode !== "bus" ? end.nodes[end.nodes.length - 1] : -1;
@@ -140,9 +157,4 @@ export function levelsOf(level: string | undefined): number[] {
     const n = Number(part);
     return Number.isFinite(n) ? [n] : [];
   });
-}
-
-/** The floor plan of one level of a building: the rooms, corridors and areas on it. */
-export function floorPlan(rooms: IndoorRoom[] | undefined, level: number): IndoorRoom[] {
-  return (rooms ?? []).filter((r) => r.source === "osm" && r.outline && levelsOf(r.level).includes(level));
 }

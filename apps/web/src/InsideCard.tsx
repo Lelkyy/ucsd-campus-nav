@@ -1,4 +1,4 @@
-import type { InsideHints } from "@campus/core";
+import { floorPhrase, type InsideHints } from "@campus/core";
 import type { ReactNode } from "react";
 
 /** What to do on arrival: which door, which floor, elevator, and student tips. */
@@ -9,51 +9,42 @@ export function InsideCard({
   tips,
   onShowRoom,
   onPinRoom,
-  onOpenInside,
 }: {
   buildingName: string;
   hints: InsideHints;
   stepFree: boolean;
   tips: string[];
-  /** Zoom the map to the room on its floor plan. */
+  /** Zoom the map to the room's spot. */
   onShowRoom?: () => void;
   /** Start marking where an unmapped room is. */
   onPinRoom?: () => void;
-  /** Open the drawing of the building's inside. */
-  onOpenInside?: () => void;
 }) {
   const rows: [string, ReactNode][] = [];
   if (hints.enterBy) rows.push(["Enter", <>Use {hints.enterBy}.</>]);
-  if (hints.room && hints.mappedRoom) {
+  if (hints.room) {
+    const floor = hints.floor;
     rows.push([
       "Room",
       <>
-        {hints.room} is on <strong>{hints.floor?.label.toLowerCase() ?? "an unknown floor"}</strong>
-        <span className="muted">{hints.floor?.source === "pinned" ? " (pinned by a student)" : " (from the floor plan)"}</span>.{" "}
-        {onShowRoom && (
-          <button className="link" onClick={onShowRoom}>
-            Show it on the map
-          </button>
-        )}
-      </>,
-    ]);
-  } else if (hints.room) {
-    rows.push([
-      "Room",
-      <>
-        {hints.floor ? (
+        {floor ? (
           <>
-            {hints.room} is probably on <strong>{hints.floor.label.toLowerCase()}</strong>
-            <span className="muted"> (going by the room number)</span>.
+            {hints.room}: it's <strong>{floorPhrase(floor)}</strong>
+            {floor.source === "number" && <span className="muted"> (going by the room number)</span>}
+            {floor.source === "pinned" && <span className="muted"> (pinned by a student)</span>}.
           </>
         ) : (
           <>Look for {hints.room} once inside.</>
         )}{" "}
-        <span className="muted">Its exact spot isn't mapped yet.</span>{" "}
-        {onPinRoom && (
-          <button className="link" onClick={onPinRoom}>
-            Pin this room
+        {onShowRoom ? (
+          <button className="link" onClick={onShowRoom}>
+            Show it on the map
           </button>
+        ) : (
+          onPinRoom && (
+            <button className="link" onClick={onPinRoom}>
+              Pin this room
+            </button>
+          )
         )}
       </>,
     ]);
@@ -72,14 +63,7 @@ export function InsideCard({
   if (!rows.length) return null;
   return (
     <section className="inside" aria-label={`Inside ${buildingName}`}>
-      <div className="inside-head">
-        <h3>Inside {buildingName}</h3>
-        {onOpenInside && (
-          <button className="link" onClick={onOpenInside}>
-            Open inside view
-          </button>
-        )}
-      </div>
+      <h3>Inside {buildingName}</h3>
       <dl>
         {rows.map(([k, v], i) => (
           <div key={i}>

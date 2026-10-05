@@ -1,16 +1,15 @@
 import {
+  CampusSearch,
   MODES,
   buildSteps,
   findRoom,
-  floorPlan,
-  levelsOf,
+  roomFloor,
   type IndoorData,
   formatFare,
   routeLabel,
   transitOptions,
   tripFare,
   type TransitPreference,
-  indoorRoute,
   insideHints,
   endpointLabel,
   endpointPosition,
@@ -25,8 +24,6 @@ import {
 } from "@campus/core";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { BuildingSearch } from "./BuildingSearch.tsx";
-import { BuildingView } from "./BuildingView.tsx";
-import { InsideBasic } from "./InsideBasic.tsx";
 import { loadCampus, storage, type CampusData } from "./data.ts";
 import { Itinerary, formatDistance, formatTime } from "./Itinerary.tsx";
 import { KIND_COLORS, MapView, type RouteLine } from "./MapView.tsx";
@@ -43,7 +40,7 @@ import {
   WalkIcon,
 } from "./Icons.tsx";
 import { InsideCard } from "./InsideCard.tsx";
-import { RoomInset } from "./RoomInset.tsx";
+import { RoomPointer } from "./RoomPointer.tsx";
 import { NavigationView } from "./NavigationView.tsx";
 import { TimingControl, type TimingState } from "./TimingControl.tsx";
 import { TransitPanel } from "./TransitPanel.tsx";
@@ -75,11 +72,9 @@ export function App() {
   const [pinning, setPinning] = useState<{ key: string } | null>(null);
   const [pinAt, setPinAt] = useState<LngLat | null>(null);
   /** Floor shown on the destination's floor plan (null = the room's floor), and camera moves. */
-  const [planLevel, setPlanLevel] = useState<number | null>(null);
   const [focus, setFocus] = useState<{ at: LngLat; zoom: number; key: number } | null>(null);
   /** The drawn inside view of the destination building is open. */
-  const [insideOpen, setInsideOpen] = useState(false);
-  /** Height of the room card in the map's corner, so the map buttons sit below it. */
+  /** Height of the room pointer in the map's corner, so the map buttons sit below it. */
   const [insetHeight, setInsetHeight] = useState(0);
   /** Indoor maps plus rooms pinned on this device (pins win over guesses). */
   const indoor = useMemo<IndoorData>(() => {
@@ -272,6 +267,11 @@ export function App() {
   );
 
   const allPlaces = useMemo(() => [...saved.places, ...(data?.places.places ?? [])], [saved.places, data]);
+  const placeById = useMemo(() => new Map(allPlaces.map((p) => [p.id, p])), [allPlaces]);
+  const campusSearch = useMemo(
+    () => (data ? new CampusSearch({ buildings: data.buildings, places: allPlaces, courses: data.sections?.courses, indoor }) : null),
+    [data, allPlaces, indoor],
+  );
   const steps = useMemo(() => (data && route && to ? buildSteps(data.graph, route, endpointLabel(to)) : []), [data, route, to]);
   const destBuilding = to?.kind === "building" ? to.building : null;
   const inside = useMemo(
@@ -279,50 +279,13 @@ export function App() {
     [data, destBuilding, to, route, indoor],
   );
 
-  // The way from the door to the room, when the building's corridors are mapped well
-  // enough to find one. Without it, no inside drawings are shown at all.
   const destRoom = to?.kind === "building" ? to.room : undefined;
-  const planRooms = destBuilding ? indoor[destBuilding.id] : undefined;
-  const indoorWay = useMemo(() => {
-    const end = route?.coordinates[route.coordinates.length - 1];
-    if (!destRoom || !inside || !end) return null;
-    const door = inside.entrance;
-    return indoorRoute(planRooms, destRoom, {
-      from: door?.lngLat ?? end,
-      fromLevel: levelsOf(door?.level)[0],
-      stepFree: mode === "accessible" || (mode === "bus" && transitStepFree),
-    });
-  }, [planRooms, destRoom, inside, route, mode, transitStepFree]);
-  // Every destination building with known walls gets an inside view: the full one
-  // (way to the room) where hallways are mapped, walls/doors/elevators elsewhere.
-  const insideAvailable = !!destBuilding && !!inside && (destBuilding.outline?.length ?? 0) > 0;
-  useEffect(() => {
-    if (!insideAvailable) setInsideOpen(false);
-  }, [insideAvailable]);
-
-  // The destination's floor plan, on the room's floor unless another floor is picked.
-  const planLevels = useMemo(
-    () => [...new Set((planRooms ?? []).filter((r) => r.source === "osm" && r.outline).flatMap((r) => levelsOf(r.level)))].sort((a, b) => a - b),
-    [planRooms],
-  );
-  const roomLevel = inside?.mappedRoom ? levelsOf(inside.mappedRoom.level)[0] : undefined;
-  const shownLevel = planLevel ?? roomLevel ?? (planLevels.includes(0) ? 0 : planLevels[0]);
-  const floorPlanData =
-    indoorWay && planLevels.length && shownLevel !== undefined
-      ? {
-          rooms: floorPlan(planRooms, shownLevel),
-          target: shownLevel === roomLevel ? destRoom : undefined,
-          path: indoorWay.legs.filter((l) => l.level === shownLevel).map((l) => l.points),
-        }
-      : null;
-  useEffect(() => setPlanLevel(null), [destBuilding?.id, destRoom]);
+  const destFloor = destBuilding && destRoom ? roomFloor(indoor[destBuilding.id], destRoom) : undefined;
   const roomKey = (building: { id: string; aliases: string[] }, room: string) =>
     `${building.aliases.find((a) => /^[A-Z0-9-]{2,6}$/.test(a)) ?? building.id} ${room}`;
-  const destMappedRoom = destRoom ? findRoom(planRooms, destRoom) : undefined;
   const pinDestRoom =
     destBuilding && destRoom
       ? () => {
-          setInsideOpen(false);
           setPinning({ key: roomKey(destBuilding, destRoom) });
           setPinAt(null);
           setFocus({ at: destBuilding.center, zoom: 18.6, key: Date.now() });
@@ -343,13 +306,9 @@ export function App() {
         tips={tips}
         onShowRoom={
           inside.roomAt
-            ? () => {
-                setPlanLevel(null);
-                setFocus({ at: inside.roomAt!, zoom: 19.4, key: Date.now() });
-              }
+            ? () => setFocus({ at: inside.roomAt!, zoom: 19.4, key: Date.now() })
             : undefined
         }
-        onOpenInside={insideAvailable ? () => setInsideOpen(true) : undefined}
         onPinRoom={pinDestRoom}
       />
     ) : null;
@@ -454,7 +413,6 @@ export function App() {
           showSatellite={showSatellite}
           reportPin={tab === "report" ? reportPin : pinning ? pinAt : null}
           pickingSpot={tab === "report" || !!pinning}
-          floorPlan={floorPlanData}
           focus={focus}
           userPos={navigating ? userPos : null}
           follow={navigating}
@@ -472,15 +430,6 @@ export function App() {
         <button className={`map-chip ${showNetwork ? "on" : ""}`} aria-pressed={showNetwork} onClick={() => setShowNetwork((v) => !v)}>
           <PathsIcon /> Paths
         </button>
-        {floorPlanData && planLevels.length > 0 && (
-          <div className="floor-switch" role="radiogroup" aria-label="Floor">
-            {[...planLevels].reverse().map((l) => (
-              <button key={l} role="radio" aria-checked={l === shownLevel} className={l === shownLevel ? "on" : ""} onClick={() => setPlanLevel(l)}>
-                {l < 0 ? "B" : l + 1}
-              </button>
-            ))}
-          </div>
-        )}
         {showNetwork && (
           <div className="legend">
             <span style={{ ["--c" as string]: KIND_COLORS[0] }}>Path</span>
@@ -495,51 +444,8 @@ export function App() {
       </div>
 
       {destBuilding && destRoom && !pinning && (
-        <RoomInset
-          key={`${destBuilding.id}-${destRoom}`}
-          building={destBuilding}
-          room={destRoom}
-          mapped={destMappedRoom}
-          indoorRooms={planRooms}
-          door={inside?.entrance}
-          onOpenInside={insideAvailable ? () => setInsideOpen(true) : undefined}
-          fullInside={!!indoorWay}
-          onShowRoom={
-            destMappedRoom
-              ? () => {
-                  setPlanLevel(null);
-                  setFocus({ at: destMappedRoom.center, zoom: 19.4, key: Date.now() });
-                }
-              : undefined
-          }
-          onPinRoom={pinDestRoom}
-          onHeight={setInsetHeight}
-        />
+        <RoomPointer key={`${destBuilding.id}-${destRoom}`} building={destBuilding} room={destRoom} floor={destFloor} onHeight={setInsetHeight} />
       )}
-
-      {insideOpen && destBuilding && inside && insideAvailable &&
-        (destRoom && indoorWay ? (
-          <BuildingView
-            key={`${destBuilding.id}-${destRoom}`}
-            building={destBuilding}
-            room={destRoom}
-            indoorRooms={planRooms}
-            hints={inside}
-            way={indoorWay}
-            onClose={() => setInsideOpen(false)}
-          />
-        ) : (
-          <InsideBasic
-            key={`${destBuilding.id}-${destRoom ?? ""}`}
-            building={destBuilding}
-            room={destRoom}
-            hints={inside}
-            arrival={route?.coordinates[route.coordinates.length - 1]}
-            stepFree={mode === "accessible" || (mode === "bus" && transitStepFree)}
-            onClose={() => setInsideOpen(false)}
-            onPinRoom={pinDestRoom}
-          />
-        ))}
 
       <aside className={`sheet ${sheetOpen ? "open" : ""}`} aria-label="Directions and schedule">
         <button className="sheet-handle" aria-label={sheetOpen ? "Collapse panel" : "Expand panel"} onClick={() => setSheetOpen((v) => !v)}>
@@ -570,7 +476,6 @@ export function App() {
               steps={steps}
               destination={endpointLabel(to)}
               arrival={insideCard}
-              onNear={insideAvailable ? () => setInsideOpen(true) : undefined}
               onPosition={setUserPos}
               onReroute={(p) => {
                 setFromRaw({ kind: "point", lngLat: p, label: "My location" });
@@ -596,11 +501,18 @@ export function App() {
                     label="From"
                     hideLabel
                     placeholder="Start: search or tap the map"
-                    buildings={data.buildings}
-                    places={allPlaces}
+                    search={campusSearch!}
+                    buildingById={data.buildingById}
+                    placeById={placeById}
+                    classes={schedule.meetings}
+                    onMyLocation={locate}
                     value={from}
                     active={clickTarget === "from"}
-                    onFocus={() => setClickTarget("from")}
+                    onFocus={() => {
+                      setClickTarget("from");
+                      // Phones: open the panel so the suggestions have room.
+                      setSheetOpen(true);
+                    }}
                     onSelect={(e) => {
                       setFrom(e);
                       if (e) setClickTarget("to");
@@ -610,11 +522,17 @@ export function App() {
                     label="To"
                     hideLabel
                     placeholder="Destination: building, room or place"
-                    buildings={data.buildings}
-                    places={allPlaces}
+                    search={campusSearch!}
+                    buildingById={data.buildingById}
+                    placeById={placeById}
+                    classes={schedule.meetings}
                     value={to}
                     active={clickTarget === "to"}
-                    onFocus={() => setClickTarget("to")}
+                    onFocus={() => {
+                      setClickTarget("to");
+                      // Phones: open the panel so the suggestions have room.
+                      setSheetOpen(true);
+                    }}
                     onSelect={setTo}
                   />
                 </div>

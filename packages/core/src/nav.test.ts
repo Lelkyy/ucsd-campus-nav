@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { CampusGraph } from "./graph.ts";
-import { entranceTargets, findRoom, floorFromRoom, floorPlan, floorToLevel, insideHints, levelLabel, levelsOf } from "./indoor.ts";
+import { entranceTargets, findRoom, floorFromRoom, floorPhrase, floorToLevel, insideHints, levelLabel, levelsOf, roomFloor } from "./indoor.ts";
 import { buildSteps } from "./instructions.ts";
 import { RouteTracker, currentStepIndex } from "./nav.ts";
 import { PROFILES, findRoute } from "./route.ts";
-import { searchPlaces } from "./search.ts";
-import { EdgeKind, type Building, type IndoorRoom, type Place } from "./types.ts";
+import { EdgeKind, type Building, type IndoorRoom } from "./types.ts";
 
 describe("floorFromRoom", () => {
   it.each([
@@ -102,17 +101,6 @@ describe("doors", () => {
   });
 });
 
-describe("searchPlaces", () => {
-  const places: Place[] = [
-    { id: "a", name: "Revelle bus stop", aliases: ["Revelle stop"], points: [[0, 0]], kind: "lingo" },
-    { id: "b", name: "Revelle College", aliases: [], points: [[0, 0]], kind: "stop" },
-  ];
-  it("finds student names and stops, student names first", () => {
-    expect(searchPlaces(places, "revelle").map((p) => p.id)).toEqual(["a", "b"]);
-    expect(searchPlaces(places, "revelle stop")[0].id).toBe("a");
-  });
-});
-
 describe("indoor floors", () => {
   it("reads OSM levels, including ranges and lists", () => {
     expect(levelsOf("2")).toEqual([2]);
@@ -142,8 +130,12 @@ describe("indoor floors", () => {
     expect(findRoom(rooms, "9999")).toBeUndefined();
   });
 
-  it("draws one floor at a time", () => {
-    expect(floorPlan(rooms, 2).map((r) => r.kind)).toEqual(["room", "corridor"]);
-    expect(floorPlan(rooms, 0).map((r) => r.ref)).toEqual(["1202"]);
+  it("says roughly where a room is", () => {
+    const say = (room: string) => floorPhrase(roomFloor(rooms, room)!);
+    expect(say("1202")).toBe("on the first floor"); // mapped on OSM level 0
+    expect(say("3109")).toBe("on the third floor"); // pinned on level 2
+    expect(say("2001")).toBe("on the second floor"); // from the number
+    expect(say("B210")).toBe("in the basement");
+    expect(roomFloor(rooms, "Auditorium")).toBeUndefined();
   });
 });

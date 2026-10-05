@@ -28,13 +28,11 @@ the way, using the paths, stairs and bike paths students actually use.
 - **Live directions:** press Start for turn-by-turn navigation that follows your
   GPS ("In 120 ft, turn left onto Library Walk"), re-routes when you go off
   course, can speak instructions, and keeps the screen on.
-- **Inside the building:** which door to use, which floor, elevators, and the
-  exact room, pinned by students where the building isn't mapped indoors ("Pin this
-  room"). Every destination building gets an inside view that opens as you reach
-  it: where the corridors are mapped (CSE's ground floor and basement today) it
-  walks you from the door to the room, animating the stairs or elevator between
-  floors; elsewhere it shows the walls, your door and the elevators, with the
-  floor and written steps, and never a guessed hallway.
+- **Inside the building:** which door to use, whether there's an elevator, and
+  roughly where the room is ("It's on the second floor"), kept in the map's
+  corner. Students can pin a room's exact spot for the next person.
+- **Search that understands campus:** "WLH 2001", "wlh2001", "CSE 11", "giesel"
+  (typos are fine), building codes, old names and the names students use.
 - **Student place names:** search "Revelle bus stop", "GTC" and other names
   students use. Name any spot yourself, and suggest names for everyone.
 - **Report a problem:** tap the spot on the map, pick what's wrong, and send it

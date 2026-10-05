@@ -1,5 +1,6 @@
 import {
   CampusGraph,
+  CampusSearch,
   TransitNetwork,
   type Building,
   type GraphData,
@@ -22,6 +23,8 @@ export interface CampusData {
   indoor: IndoorData;
   /** Student place names, shuttle stops and building tips. */
   places: PlacesData;
+  /** Search over buildings and rooms only (for picking a class's building). */
+  buildingSearch: CampusSearch;
 }
 
 /** Load the prebuilt graph, buildings, shuttles and sections. `bust` forces a re-fetch after an edit. */
@@ -54,6 +57,7 @@ export async function loadCampus(bust = false): Promise<CampusData> {
     sections,
     indoor,
     places,
+    buildingSearch: new CampusSearch({ buildings, indoor }),
   };
 }
 

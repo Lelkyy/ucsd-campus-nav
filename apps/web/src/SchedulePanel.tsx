@@ -77,6 +77,8 @@ export function NextUp({
 }
 
 /** The student's class schedule editor (list or week grid). */
+const NO_PLACES = new Map<string, never>();
+
 export function SchedulePanel({ data, schedule, onDirections }: Props) {
   const { meetings } = schedule;
   const [adding, setAdding] = useState<Adding>(null);
@@ -397,7 +399,9 @@ function MeetingForm({
       <BuildingSearch
         label="Building"
         placeholder="CENTR 115, WLH, Peterson…"
-        buildings={data.buildings}
+        search={data.buildingSearch}
+        buildingById={data.buildingById}
+        placeById={NO_PLACES}
         value={building ? { kind: "building", building } : null}
         onSelect={(e) => {
           if (e?.kind !== "building") return setBuildingId("");
