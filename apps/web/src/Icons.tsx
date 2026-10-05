@@ -146,6 +146,13 @@ export const PinIcon = () => (
   </Icon>
 );
 
+export const HomeIcon = () => (
+  <Icon width="18" height="18">
+    <path d="M3.5 11L12 4l8.5 7" />
+    <path d="M6 9.5V20h12V9.5M10 20v-5h4v5" />
+  </Icon>
+);
+
 export const SearchIcon = () => (
   <Icon width="18" height="18">
     <circle cx="10.5" cy="10.5" r="6" />

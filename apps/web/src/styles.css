@@ -832,3 +832,5 @@ button.start { width: 100%; padding: 11px; font-size: 15px; border-radius: 999px
 .day-badge.skip { background: var(--muted); }
 .day-chip-clash { color: var(--danger); font-weight: 700; }
 .day-chip.on .day-chip-clash { color: inherit; }
+.set-home { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); font-size: 13px; }
+.place-chip > button:first-child svg { width: 15px; height: 15px; vertical-align: -3px; }

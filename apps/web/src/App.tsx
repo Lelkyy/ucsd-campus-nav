@@ -34,6 +34,7 @@ import {
   BusIcon,
   ChevronIcon,
   CloseIcon,
+  HomeIcon,
   LocateIcon,
   PathsIcon,
   SatelliteIcon,
@@ -51,7 +52,7 @@ import { PinRoomForm } from "./PinRoomForm.tsx";
 import { PlaceNamer } from "./PlaceNamer.tsx";
 import { useRoomPins } from "./useRoomPins.ts";
 import { ReportPanel, type RouteContext } from "./ReportPanel.tsx";
-import { useSavedPlaces } from "./useSavedPlaces.ts";
+import { HOME_ID, useSavedPlaces } from "./useSavedPlaces.ts";
 import { NextUp, SchedulePanel, type ScheduleView } from "./SchedulePanel.tsx";
 import { useSchedule } from "./useSchedule.ts";
 
@@ -77,6 +78,8 @@ export function App() {
   /** The drawn inside view of the destination building is open. */
   /** Height of the room pointer in the map's corner, so the map buttons sit below it. */
   const [insetHeight, setInsetHeight] = useState(0);
+  /** Saving your home: which field asked (it gets Home once you tap the map). */
+  const [settingHome, setSettingHome] = useState<"from" | "to" | null>(null);
   /** The day view's walks and classes, drawn on the map while it's open. */
   const [dayOverlay, setDayOverlay] = useState<DayOverlay | null>(null);
   const [scheduleView, setScheduleView] = useState<ScheduleView>(() => storage.get<ScheduleView>("campus-nav:schedule-view", "day"));
@@ -365,10 +368,33 @@ export function App() {
     );
   };
 
+  /** Save your home and put it in the field that asked for it. */
+  const saveHome = (points: LngLat[]) => {
+    const home = saved.setHome(points);
+    if (settingHome === "from") setFrom({ kind: "place", place: home });
+    else if (settingHome === "to") setTo({ kind: "place", place: home });
+    setSettingHome(null);
+    setHint(null);
+  };
+  const startSettingHome = (field: "from" | "to") => {
+    setTab("go");
+    setSettingHome(field);
+    setHint(null);
+  };
+  const homeFromLocation = () => {
+    if (!navigator.geolocation) return setHint("Location isn't available in this browser.");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => saveHome([[pos.coords.longitude, pos.coords.latitude]]),
+      (err) => setHint(`Couldn't get your location: ${err.message}`),
+      { enableHighAccuracy: true, timeout: 10_000 },
+    );
+  };
+
   const onMapClick = (p: LngLat) => {
     if (!data) return;
     if (tab === "report") return setReportPin(p);
     if (pinning) return setPinAt(p);
+    if (settingHome) return saveHome([p]);
     const pin: Endpoint = { kind: "point", lngLat: p, label: "Dropped pin" };
     if (clickTarget === "from") {
       setFrom(pin);
@@ -547,6 +573,8 @@ export function App() {
                     placeById={placeById}
                     classes={schedule.meetings}
                     onMyLocation={locate}
+                    home={saved.home}
+                    onSetHome={() => startSettingHome("from")}
                     value={from}
                     active={clickTarget === "from"}
                     onFocus={() => {
@@ -567,6 +595,8 @@ export function App() {
                     buildingById={data.buildingById}
                     placeById={placeById}
                     classes={schedule.meetings}
+                    home={saved.home}
+                    onSetHome={() => startSettingHome("to")}
                     value={to}
                     active={clickTarget === "to"}
                     onFocus={() => {
@@ -631,6 +661,19 @@ export function App() {
                 </p>
               )}
               {hint && <p className="note warn-note">{hint}</p>}
+              {settingHome && (
+                <div className="set-home" role="status" ref={(el) => el?.scrollIntoView({ block: "nearest" })}>
+                  <span>
+                    <strong>Set your home:</strong> tap it on the map.
+                  </span>
+                  <span className="form-row">
+                    <button onClick={homeFromLocation}>Use my location</button>
+                    <button className="link" onClick={() => setSettingHome(null)}>
+                      Cancel
+                    </button>
+                  </span>
+                </div>
+              )}
               {mode === "bus" && busUnavailable && (
                 <p className="note warn-note">{busUnavailable} Showing the walk.</p>
               )}
@@ -705,6 +748,13 @@ export function App() {
                     defaultName={to.kind === "point" ? "" : endpointLabel(to)}
                     onSave={(name, note) => saved.add(name, to.kind === "place" ? to.place.points : [endpointPosition(to)], note)}
                   />
+                  {!(to.kind === "place" && to.place.id === HOME_ID) && (
+                    <p className="muted small">
+                      <button className="link" onClick={() => saved.setHome(to.kind === "place" ? to.place.points : [endpointPosition(to)])}>
+                        {saved.home ? "Make this your home instead" : "Set this as your home"}
+                      </button>
+                    </p>
+                  )}
                   <p className="muted small">
                     Something wrong with this route?{" "}
                     <button className="link" onClick={() => openReport(true)}>
@@ -713,11 +763,20 @@ export function App() {
                   </p>
                 </>
               )}
-              {!to && saved.places.length > 0 && (
+              {!to && (saved.places.length > 0 || !saved.home) && (
                 <div className="saved-places" aria-label="Your places">
+                  {!saved.home && (
+                    <span className="place-chip">
+                      <button onClick={() => startSettingHome("to")}>
+                        <HomeIcon /> Set home
+                      </button>
+                    </span>
+                  )}
                   {saved.places.map((p) => (
                     <span key={p.id} className="place-chip">
-                      <button onClick={() => setTo({ kind: "place", place: p })}>{p.name}</button>
+                      <button onClick={() => setTo({ kind: "place", place: p })}>
+                        {p.id === HOME_ID && <HomeIcon />} {p.name}
+                      </button>
                       <button className="icon-btn" aria-label={`Forget ${p.name}`} onClick={() => saved.remove(p.id)}>
                         <CloseIcon />
                       </button>

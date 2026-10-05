@@ -14,6 +14,19 @@ const places: Place[] = [
 const courses: CourseSections[] = [
   { code: "CSE 5", title: "Introduction to Programming in R", meetings: [["A00", "LE", "C", "MWF", "", "1300", "1350", "CENTR", "101"]] },
   { code: "CSE 599", title: "Teaching Methods", meetings: [["A00", "LE", "C", "M", "", "1500", "1550", "EBU3B", "1202"]] },
+  {
+    code: "CSE 8B",
+    title: "Introduction to Programming 2",
+    meetings: [
+      ["001-000-LE", "LE", "C", "TuTh", "", "0930", "1050", "WLH", "2001"],
+      ["001-000-LE", "LE", "F", "", "12/10/2026", "0800", "1059", "WLH", "2001"],
+      ["001-001-DI", "DI", "C", "W", "", "1300", "1350", "CENTR", "115"],
+      ["001-002-DI", "DI", "C", "W", "", "1400", "1450", "CENTR", "115"],
+      ["002-000-LE", "LE", "C", "MW", "", "1830", "1950", "CENTR", "115"],
+      ["002-001-DI", "DI", "C", "Th", "", "1700", "1750", "WLH", "2005"],
+      ["002-002-LA", "LA", "C", "F", "", "1000", "1150", "EBU3B", "B240"],
+    ],
+  },
   { code: "CSE 11", title: "Accelerated Intro to Programming", meetings: [["A00", "LE", "C", "TuTh", "", "1100", "1220", "CENTR", "115"]] },
   { code: "CSE 12", title: "Basic Data Structures", meetings: [["A00", "LE", "C", "MWF", "", "0900", "0950", "WLH", "2001"]] },
   { code: "MATH 20C", title: "Calculus and Analytic Geometry", meetings: [["A00", "LE", "C", "MWF", "", "1000", "1050", "PCYNH", "109"]] },
@@ -130,6 +143,34 @@ describe("CampusSearch", () => {
     expect(search.search("cse005").filter((h) => h.kind === "course").map((h) => h.kind === "course" && h.course.code)).toEqual(["CSE 5"]);
     expect(first("math020c")).toBe("course MATH 20C");
     expect(first("MATH 020C")).toBe("course MATH 20C");
+  });
+
+  it("lists each section of a course separately", () => {
+    const sections = (q: string) => search.search(q).flatMap((h) => (h.kind === "course" ? [`${h.section} ${h.meeting.type} ${h.room}`] : []));
+    // Two lectures: one result each, at their own rooms.
+    expect(sections("CSE 8B")).toEqual(["001 LE 2001", "002 LE 115"]);
+    // A lecture group and its discussions and lab.
+    expect(sections("cse8b 002")).toEqual(["002 LE 115", "002-001 DI 2005", "002-002 LA B240"]);
+    expect(sections("CSE 8B sec 001")).toEqual(["001 LE 2001", "001-001 DI 115", "001-002 DI 115"]);
+    // One discussion, all discussions, the labs.
+    expect(sections("cse8b 001-002")).toEqual(["001 LE 2001", "001-002 DI 115"]);
+    expect(sections("cse 8b discussion")).toEqual(["001-001 DI 115", "001-002 DI 115", "002-001 DI 2005"]);
+    expect(sections("cse8blab")).toEqual(["002-002 LA B240"]);
+    // One lecture: its discussions come with it.
+    expect(sections("CSE 11")).toEqual(["A00 LE 115"]);
+    // A course code isn't read as a room in a building with that code.
+    expect(search.search("CSE 11").some((h) => h.kind === "room")).toBe(false);
+  });
+
+  it("isn't thrown by spaces", () => {
+    for (const q of ["  CSE   8B ", "cse8b", "c s e 8 b"]) expect(search.search(q)[0], q).toMatchObject({ kind: "course", section: "001" });
+    expect(first("pricecenter")).toMatch(/^building Price Center/);
+    expect(first("geisellibrary")).toBe("building Geisel Library");
+    expect(first("warrenlecturehall")).toBe("building Warren Lecture Hall");
+    expect(first("warrenlecturehall2001")).toBe("room Warren Lecture Hall 2001");
+    expect(first("W L H 2001")).toBe("room Warren Lecture Hall 2001");
+    expect(first("  wlh    2001  ")).toBe("room Warren Lecture Hall 2001");
+    expect(first("revellebusstop")).toBe("place Revelle bus stop");
   });
 
   it("puts your own classes first", () => {

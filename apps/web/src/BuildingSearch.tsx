@@ -1,7 +1,8 @@
-import { endpointLabel, floorPhrase, type Building, type CampusSearch, type ClassMeeting, type Endpoint, type FloorGuess, type Place, type SearchHit } from "@campus/core";
+import { MEETING_TYPES, endpointLabel, floorPhrase, type Building, type CampusSearch, type ClassMeeting, type Endpoint, type FloorGuess, type Place, type SectionMeeting, type SearchHit } from "@campus/core";
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { storage } from "./data.ts";
-import { BookIcon, BuildingIcon, ClockIcon, CloseIcon, DoorIcon, LocateIcon, PinIcon, SearchIcon } from "./Icons.tsx";
+import { HOME_ID } from "./useSavedPlaces.ts";
+import { BookIcon, BuildingIcon, ClockIcon, CloseIcon, DoorIcon, HomeIcon, LocateIcon, PinIcon, SearchIcon } from "./Icons.tsx";
 
 interface Props {
   label: string;
@@ -17,6 +18,9 @@ interface Props {
   onFocus?: () => void;
   /** Offer "Your location" (the start field). */
   onMyLocation?: () => void;
+  /** Your saved home, offered first; without one, `onSetHome` offers to save it. */
+  home?: Place | null;
+  onSetHome?: () => void;
   /** Keep the label for screen readers only (the From/To fields show it visually instead). */
   hideLabel?: boolean;
 }
@@ -55,6 +59,8 @@ export function BuildingSearch({
   onSelect,
   onFocus,
   onMyLocation,
+  home,
+  onSetHome,
   hideLabel,
 }: Props) {
   const id = useId();
@@ -96,6 +102,15 @@ export function BuildingSearch({
       };
       groups.push({ options: [{ key: "me", icon: <LocateIcon />, title: "Your location", pick }] });
     }
+    if (home) groups.push({ options: [{ key: "home", icon: <HomeIcon />, title: "Home", detail: "Saved on this device", pick: toPlace(home) }] });
+    else if (onSetHome) {
+      const pick = () => {
+        setOpen(false);
+        inputRef.current?.blur();
+        onSetHome();
+      };
+      groups.push({ options: [{ key: "set-home", icon: <HomeIcon />, title: "Set your home", detail: "Save it for one-tap directions", pick }] });
+    }
     const mine = uniqueClasses(classes)
       .map((m) => ({ m, b: buildingById.get(m.buildingId) }))
       .filter((x): x is { m: ClassMeeting; b: Building } => !!x.b)
@@ -123,7 +138,7 @@ export function BuildingSearch({
     if (recent.length) groups.push({ heading: "Recent", options: recent });
     return groups;
     // optionFor/toBuilding/toPlace only close over stable values and setters.
-  }, [typed, search, classes, recents, buildingById, placeById, onMyLocation]);
+  }, [typed, search, classes, recents, buildingById, placeById, onMyLocation, home, onSetHome]);
 
   function optionFor(h: SearchHit, q: string): Option {
     switch (h.kind) {
@@ -138,14 +153,21 @@ export function BuildingSearch({
           pick: toBuilding(h.building, m.room),
         };
       }
-      case "course":
+      case "course": {
+        // A course while its code is being typed; else one section: "CSE 8B · Lecture 002".
+        const kind = MEETING_TYPES[h.meeting.type] ?? h.meeting.type;
+        const where = `${codeOf(h.building) ?? h.building.name}${h.room ? ` ${h.room}` : ""}`;
+        const floor = h.room ? search.floorOf(h.building, h.room) : undefined;
         return {
-          key: `k-${h.course.code}`,
+          key: `k-${h.course.code}-${h.section}`,
           icon: <BookIcon />,
-          title: `${h.course.code} · ${h.course.title}`,
-          detail: `Lecture in ${codeOf(h.building) ?? h.building.name}${h.room ? ` ${h.room}` : ""}`,
+          title: h.listing ? `${h.course.code} · ${h.course.title}` : `${h.course.code} · ${kind} ${h.section}`,
+          detail: h.listing
+            ? joinDetail(`${kind} ${h.section}`, sectionWhen(h.meeting), where)
+            : joinDetail(sectionWhen(h.meeting), where, floor && floorShort(floor)),
           pick: toBuilding(h.building, h.room),
         };
+      }
       case "room":
         return {
           key: `m-${h.building.id}-${h.room}`,
@@ -163,7 +185,7 @@ export function BuildingSearch({
           pick: toBuilding(h.building),
         };
       case "place":
-        return { key: `p-${h.place.id}`, icon: <PinIcon />, title: h.place.name, detail: PLACE_KIND[h.place.kind], pick: toPlace(h.place) };
+        return { key: `p-${h.place.id}`, icon: h.place.id === HOME_ID ? <HomeIcon /> : <PinIcon />, title: h.place.name, detail: PLACE_KIND[h.place.kind], pick: toPlace(h.place) };
     }
   }
 
@@ -311,6 +333,17 @@ function whenText(m: ClassMeeting): string | undefined {
   const [h, min] = m.start.split(":").map(Number);
   const t = `${((h + 11) % 12) + 1}${min ? `:${String(min).padStart(2, "0")}` : ""}${h < 12 ? "am" : "pm"}`;
   return `${m.days.join("")} ${t}`;
+}
+
+/** "TuTh 9:30–10:50am". */
+function sectionWhen(m: SectionMeeting): string | undefined {
+  if (!m.days.length) return undefined;
+  const t = (hhmm: string) => {
+    const [h, min] = hhmm.split(":").map(Number);
+    return `${((h + 11) % 12) + 1}${min ? `:${String(min).padStart(2, "0")}` : ""}`;
+  };
+  const pm = Number(m.end.split(":")[0]) >= 12;
+  return `${m.days.join("")} ${t(m.start)}–${t(m.end)}${pm ? "pm" : "am"}`;
 }
 
 /** One entry per course and room (a lecture meets three times a week but is one place). */

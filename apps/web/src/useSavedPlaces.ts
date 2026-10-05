@@ -4,6 +4,8 @@ import { REPORT_EMAIL } from "./config.ts";
 import { storage } from "./data.ts";
 
 const KEY = "campus-nav:places";
+/** Your home is a saved place with this id (one at most). */
+export const HOME_ID = "saved-home";
 
 /** Your own names for places ("my bike rack", "Muir Field drop-off"), saved in this browser. */
 export function useSavedPlaces() {
@@ -16,8 +18,15 @@ export function useSavedPlaces() {
     return place;
   }, []);
   const remove = useCallback((id: string) => setPlaces((cur) => cur.filter((p) => p.id !== id)), []);
+  /** Save (or move) your home; it's listed first and found by searching "home". */
+  const setHome = useCallback((points: LngLat[]): Place => {
+    const home: Place = { id: HOME_ID, name: "Home", aliases: ["My home", "House", "Apartment"], points, kind: "saved" };
+    setPlaces((cur) => [home, ...cur.filter((p) => p.id !== HOME_ID)]);
+    return home;
+  }, []);
+  const home = places.find((p) => p.id === HOME_ID) ?? null;
 
-  return { places, add, remove };
+  return { places, add, remove, home, setHome };
 }
 
 /** Email link suggesting a place name for everyone (maintainers add it to data/places.json). */

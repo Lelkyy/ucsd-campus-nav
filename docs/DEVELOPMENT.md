@@ -104,6 +104,10 @@ Ask Leonid for the files. Don't commit them or the generated
 
 ## Student place names
 
+**Home** is a saved place (`saved-home` in `campus-nav:places`): set it by
+tapping the map, with your location, or "Set this as your home" on any
+destination; it's offered first in both search boxes and found by "home".
+
 `data/places.json` holds names students use ("Revelle bus stop", "GTC"). Each
 entry points at shuttle stops by their exact timetable name and/or `[lon, lat]`
 points; a route goes to the closest. `tips` adds notes for a building code or
@@ -164,14 +168,21 @@ transit classes in the `poi_r*` layers).
   building with that room, "WLH 20" lists the rooms starting with 20, and a full
   number nobody's class uses is still offered (marked "not a listed classroom").
   Numbers are never typo-matched;
-- courses ("CSE 11", "math20c", or a title like "data structures") at their
-  lecture's room, and your own classes first. Leading zeros are fine
+- courses ("CSE 11", "math20c", or a title like "data structures"), one result
+  per section: each lecture group ("CSE 11" -> 001 TuTh at GH 242, 002 MW at
+  CENTR 115; with one lecture, its discussions too), a group and its
+  discussions/labs ("cse11 002"), one ("cse11 001-002"), or all of a kind
+  ("cse11 lab"); a code still being typed ("cse1") lists courses. A course code
+  is never read as a room. Your own classes come first. Leading zeros are fine
   (`courseKey`): "cse005", "CSE 005", "cse-005" are CSE 5, and a zero-padded
   number is taken as complete (CSE 5, not CSE 599; "cse008" still gives CSE 8A);
 - student place names, your saved places, then shuttle stops.
 
-Empty, the box offers your location (start field), your classes and recent
-picks (kept in `localStorage`). It's a keyboard combobox (arrows, Enter, Esc).
+Spaces don't matter: names are also indexed with their spaces taken out
+("pricecenter", "warrenlecturehall2001", "W L H 2001", "c s e 1 1").
+
+Empty, the box offers your location (start field), Home (or "Set your home"),
+your classes and recent picks (kept in `localStorage`). It's a keyboard combobox (arrows, Enter, Esc).
 
 ## Fixing the map
 

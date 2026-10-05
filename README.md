@@ -35,8 +35,10 @@ the way, using the paths, stairs and bike paths students actually use.
   them takes and whether the gap is enough, and get directions to any class,
   from where you are or from the class before. Overlapping classes show as a
   conflict to choose from, and the day's walks are drawn on the map.
-- **Search that understands campus:** "WLH 2001", "wlh2001", "CSE 11", "giesel"
-  (typos are fine), building codes, old names and the names students use.
+- **Search that understands campus:** "WLH 2001", "wlh2001", "CSE 11" (each
+  section separately), "giesel" (typos and missing spaces are fine), building
+  codes, old names and the names students use.
+- **Home:** save it once, and it's one tap from either search box.
 - **Student place names:** search "Revelle bus stop", "GTC" and other names
   students use. Name any spot yourself, and suggest names for everyone.
 - **Report a problem:** tap the spot on the map, pick what's wrong, and send it
