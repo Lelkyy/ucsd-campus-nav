@@ -31,6 +31,9 @@ the way, using the paths, stairs and bike paths students actually use.
 - **Inside the building:** which door to use, whether there's an elevator, and
   roughly where the room is ("It's on the second floor"), kept in the map's
   corner. Students can pin a room's exact spot for the next person.
+- **Your whole day:** see any day's classes in order, how long each walk between
+  them takes and whether the gap is enough, and get directions to any class,
+  from where you are or from the class before.
 - **Search that understands campus:** "WLH 2001", "wlh2001", "CSE 11", "giesel"
   (typos are fine), building codes, old names and the names students use.
 - **Student place names:** search "Revelle bus stop", "GTC" and other names

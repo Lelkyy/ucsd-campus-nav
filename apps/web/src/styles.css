@@ -776,3 +776,48 @@ button.start { width: 100%; padding: 11px; font-size: 15px; border-radius: 999px
   /* No room for the zoom buttons under both; the map follows you, and pinching zooms. */
   .app.navigating.has-inset .maplibregl-ctrl-top-right { display: none; }
 }
+
+/* ---------- Your day (timetable) ---------- */
+.next-up-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.next-up-wrap .next-up { width: 100%; }
+.next-up-day { font-size: 13px; }
+.day-view { display: flex; flex-direction: column; gap: 10px; }
+.day-nav { display: flex; align-items: center; gap: 8px; }
+.day-title { display: flex; flex-direction: column; min-width: 0; flex: 1; text-align: center; }
+.day-title strong { font-size: 16px; }
+.day-chips { display: flex; gap: 6px; }
+.day-chip { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 0; font-size: 12px; }
+.day-chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.day-chip-count { font-size: 11px; opacity: 0.75; }
+.day-chip-today { position: absolute; top: 4px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--gold); }
+.day-empty { margin: 4px 0; }
+.day-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.day-class {
+  display: grid;
+  grid-template-columns: 78px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 12px;
+  border-radius: var(--radius-sm);
+  border-left: 4px solid var(--course, var(--accent));
+  background: var(--surface-2);
+}
+.day-class.done { opacity: 0.55; }
+.day-class.now { background: color-mix(in srgb, var(--course, var(--accent)) 14%, var(--surface-2)); }
+.day-time { font-size: 13px; font-weight: 650; display: flex; flex-direction: column; }
+.day-time .muted { font-weight: 500; font-size: 12px; }
+.day-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.day-course { font-weight: 650; }
+.day-course .muted { font-weight: 500; font-size: 13px; }
+.day-badge { margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--course, var(--accent)); color: #fff; vertical-align: 1px; }
+.day-badge.exam { background: var(--danger); }
+.small-btn { padding: 6px 10px; font-size: 13px; white-space: nowrap; }
+.day-leg { display: flex; align-items: center; gap: 8px; padding: 6px 0 6px 40px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.day-leg-line { width: 2px; align-self: stretch; min-height: 18px; margin-right: 4px; background: repeating-linear-gradient(var(--border) 0 3px, transparent 3px 6px); }
+.day-leg-text { flex: 1; min-width: 0; }
+.day-leg.tight .day-leg-text { color: var(--danger); }
+@media (max-width: 760px) {
+  .day-class { grid-template-columns: 64px 1fr; }
+  .day-class > button { grid-column: 1 / -1; justify-self: start; }
+  .day-leg { padding-left: 20px; }
+}

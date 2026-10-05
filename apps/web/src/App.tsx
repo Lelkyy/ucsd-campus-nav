@@ -13,7 +13,9 @@ import {
   insideHints,
   endpointLabel,
   endpointPosition,
+  CLASS_BUFFER_MIN,
   nextOccurrence,
+  startOn,
   planRoute,
   type ClassMeeting,
   type Endpoint,
@@ -42,6 +44,7 @@ import {
 import { InsideCard } from "./InsideCard.tsx";
 import { RoomPointer } from "./RoomPointer.tsx";
 import { NavigationView } from "./NavigationView.tsx";
+import type { DirectionsOptions } from "./DayView.tsx";
 import { TimingControl, type TimingState } from "./TimingControl.tsx";
 import { TransitPanel } from "./TransitPanel.tsx";
 import { PinRoomForm } from "./PinRoomForm.tsx";
@@ -49,13 +52,11 @@ import { PlaceNamer } from "./PlaceNamer.tsx";
 import { useRoomPins } from "./useRoomPins.ts";
 import { ReportPanel, type RouteContext } from "./ReportPanel.tsx";
 import { useSavedPlaces } from "./useSavedPlaces.ts";
-import { NextUp, SchedulePanel } from "./SchedulePanel.tsx";
+import { NextUp, SchedulePanel, type ScheduleView } from "./SchedulePanel.tsx";
 import { useSchedule } from "./useSchedule.ts";
 
 /** Suggest transit while walking only when it saves at least this much time. */
 const SUGGEST_MIN_FASTER = 3;
-/** Aim to reach class this many minutes early. */
-const CLASS_BUFFER_MIN = 2;
 const BIKE_COLOR = "#16a34a";
 const MODE_ICONS: Record<ModeId, () => JSX.Element> = { walk: WalkIcon, accessible: StepFreeIcon, bike: BikeIcon, bus: BusIcon };
 
@@ -76,6 +77,8 @@ export function App() {
   /** The drawn inside view of the destination building is open. */
   /** Height of the room pointer in the map's corner, so the map buttons sit below it. */
   const [insetHeight, setInsetHeight] = useState(0);
+  const [scheduleView, setScheduleView] = useState<ScheduleView>(() => storage.get<ScheduleView>("campus-nav:schedule-view", "day"));
+  useEffect(() => storage.set("campus-nav:schedule-view", scheduleView), [scheduleView]);
   /** Indoor maps plus rooms pinned on this device (pins win over guesses). */
   const indoor = useMemo<IndoorData>(() => {
     if (!data) return {};
@@ -266,6 +269,19 @@ export function App() {
     [data, from, myLocation, mode, planFor, transitFor],
   );
 
+  /** Getting from one class's building to the next (the day view): on foot, or by bike / step-free in those modes. */
+  const estimateBetween = useCallback(
+    (fromId: string, toId: string, arrive: Date): Route | null => {
+      const a = data?.buildingById.get(fromId);
+      const b = data?.buildingById.get(toId);
+      if (!a || !b) return null;
+      const m: ModeId = mode === "bike" || mode === "accessible" ? mode : "walk";
+      const p = planFor(m, { kind: "building", building: a }, { kind: "building", building: b }, arrive);
+      return p?.ok ? p.route : null;
+    },
+    [data, mode, planFor],
+  );
+
   const allPlaces = useMemo(() => [...saved.places, ...(data?.places.places ?? [])], [saved.places, data]);
   const placeById = useMemo(() => new Map(allPlaces.map((p) => [p.id, p])), [allPlaces]);
   const campusSearch = useMemo(
@@ -313,6 +329,11 @@ export function App() {
       />
     ) : null;
 
+  // Only the stops the route gets on or off at; the rest of the network stays off the map.
+  const routeStops = useMemo(
+    () => [...new Map((route?.legs ?? []).flatMap((l) => (l.mode === "bus" ? [l.from, l.to] : [])).map((s) => [s.id, s])).values()],
+    [route],
+  );
   const routeLines: RouteLine[] | null = route
     ? route.legs.map((l) => ({
         coordinates: l.coordinates,
@@ -354,18 +375,24 @@ export function App() {
     setHint(null);
   };
 
-  const onDirections = (meeting: ClassMeeting) => {
+  /**
+   * Directions to a class: for its next meeting, or a given day's (from the day
+   * view), starting from your location or from another class's room.
+   */
+  const onDirections = (meeting: ClassMeeting, opts: Partial<DirectionsOptions> = {}) => {
     const building = data?.buildingById.get(meeting.buildingId);
     if (!building) return setHint("That class isn't at a building on the map.");
     setTab("go");
     setToRaw(withRoom({ kind: "building", building, room: meeting.room }));
-    if (myLocation) setFromRaw({ kind: "point", lngLat: myLocation, label: "My location" });
+    const fromBuilding = opts.from ? data?.buildingById.get(opts.from.buildingId) : undefined;
+    if (fromBuilding) setFromRaw(withRoom({ kind: "building", building: fromBuilding, room: opts.from?.room }));
+    else if (myLocation) setFromRaw({ kind: "point", lngLat: myLocation, label: "My location" });
     else if (!from) {
       setClickTarget("from");
       setHint("Choose a start: use your location, search, or click the map.");
     }
     if (building.access === "shuttle" && mode !== "bike") setMode("bus");
-    const start = nextOccurrence(meeting);
+    const start = opts.date ? startOn(meeting, opts.date) : nextOccurrence(meeting);
     setArriveBy(
       start
         ? {
@@ -404,8 +431,8 @@ export function App() {
           graph={data.graph}
           routeLines={routeLines}
           connectors={plan?.ok ? plan.connectors : []}
-          stops={data.transit.data.stops}
-          showStops={mode === "bus" || !!route?.usesTransit}
+          stops={routeStops}
+          showStops={routeStops.length > 0}
           from={from ? endpointPosition(from) : null}
           to={to ? endpointPosition(to) : null}
           showNetwork={showNetwork}
@@ -488,7 +515,16 @@ export function App() {
             />
           ) : tab === "go" ? (
             <>
-              <NextUp data={data} meetings={schedule.meetings} estimate={estimateClass} onDirections={onDirections} />
+              <NextUp
+                data={data}
+                meetings={schedule.meetings}
+                estimate={estimateClass}
+                onDirections={onDirections}
+                onSeeDay={() => {
+                  setScheduleView("day");
+                  setTab("schedule");
+                }}
+              />
 
               <div className="trip">
                 <div className="trip-rail" aria-hidden>
@@ -692,7 +728,14 @@ export function App() {
               )}
             </>
           ) : tab === "schedule" ? (
-            <SchedulePanel data={data} schedule={schedule} onDirections={onDirections} />
+            <SchedulePanel
+              data={data}
+              schedule={schedule}
+              view={scheduleView}
+              onView={setScheduleView}
+              estimateBetween={estimateBetween}
+              onDirections={onDirections}
+            />
           ) : (
             <ReportPanel
               buildings={data.buildings}

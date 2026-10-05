@@ -14,13 +14,20 @@ import {
 } from "@campus/core";
 import { useMemo, useRef, useState } from "react";
 import { BuildingSearch } from "./BuildingSearch.tsx";
+import { DayView, type DirectionsOptions } from "./DayView.tsx";
 import type { CampusData } from "./data.ts";
 import type { Schedule } from "./useSchedule.ts";
+
+export type ScheduleView = "day" | "list" | "week";
 
 interface Props {
   data: CampusData;
   schedule: Schedule;
-  onDirections: (meeting: ClassMeeting) => void;
+  view: ScheduleView;
+  onView: (v: ScheduleView) => void;
+  estimateBetween: (fromBuildingId: string, toBuildingId: string, arriveBy: Date) => Route | null;
+  /** Directions to a class: its next meeting, or a given day's, from your location or another class. */
+  onDirections: (meeting: ClassMeeting, opts?: DirectionsOptions) => void;
 }
 
 const SCHOOL_DAYS: Weekday[] = ["M", "Tu", "W", "Th", "F"];
@@ -40,11 +47,14 @@ export function NextUp({
   meetings,
   estimate,
   onDirections,
+  onSeeDay,
 }: {
   data: CampusData;
   meetings: ClassMeeting[];
   estimate: (buildingId: string, startsAt: Date) => Route | null;
   onDirections: (meeting: ClassMeeting) => void;
+  /** Open the whole day's timetable. */
+  onSeeDay?: () => void;
 }) {
   // Only meetings with a place on the map are something to walk or ride to.
   const next = nextClass(meetings.filter((m) => m.buildingId));
@@ -55,34 +65,42 @@ export function NextUp({
   const now = new Date();
   const late = trip && trip.leaveAt < now;
   return (
-    <button
-      className="next-up"
-      style={{ ["--course" as string]: courseColor(meetings, next.meeting.course) }}
-      onClick={() => onDirections(next.meeting)}
-    >
-      <span className="next-up-label">Next class</span>
-      <span className="next-up-title">
-        {next.meeting.course} <span className="muted">{typeLabel(next.meeting.type)}</span>
-      </span>
-      <span className="next-up-meta">
-        {formatWhen(next.startsAt, now)} · {placeLabel(next.meeting, data)}
-      </span>
-      <span className={`next-up-leave ${late ? "late" : ""}`}>
-        {trip
-          ? `${late ? "Leave now" : `Leave by ${formatClock(trip.leaveAt)}`} · ${Math.ceil(trip.minutes)} min`
-          : "Set a start to see when to leave"}
-      </span>
-    </button>
+    <div className="next-up-wrap">
+      <button
+        className="next-up"
+        style={{
+          ["--course" as string]: courseColor(meetings, next.meeting.course),
+        }}
+        onClick={() => onDirections(next.meeting)}
+      >
+        <span className="next-up-label">Next class</span>
+        <span className="next-up-title">
+          {next.meeting.course} <span className="muted">{typeLabel(next.meeting.type)}</span>
+        </span>
+        <span className="next-up-meta">
+          {formatWhen(next.startsAt, now)} · {placeLabel(next.meeting, data)}
+        </span>
+        <span className={`next-up-leave ${late ? "late" : ""}`}>
+          {trip
+            ? `${late ? "Leave now" : `Leave by ${formatClock(trip.leaveAt)}`} · ${Math.ceil(trip.minutes)} min`
+            : "Set a start to see when to leave"}
+        </span>
+      </button>
+      {onSeeDay && (
+        <button className="link next-up-day" onClick={onSeeDay}>
+          Your whole day ›
+        </button>
+      )}
+    </div>
   );
 }
 
-/** The student's class schedule editor (list or week grid). */
+/** The student's schedule: the day's timetable, the week grid, or the course list to edit. */
 const NO_PLACES = new Map<string, never>();
 
-export function SchedulePanel({ data, schedule, onDirections }: Props) {
+export function SchedulePanel({ data, schedule, view, onView, estimateBetween, onDirections }: Props) {
   const { meetings } = schedule;
   const [adding, setAdding] = useState<Adding>(null);
-  const [view, setView] = useState<"list" | "week">("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -90,17 +108,17 @@ export function SchedulePanel({ data, schedule, onDirections }: Props) {
   const courses = useMemo(() => [...new Set(meetings.map((m) => m.course))].sort(), [meetings]);
   const colorOf = (course: string) => courseColor(meetings, course);
 
-
   return (
     <section className="panel">
       <div className="panel-head">
         <h2>
-          My schedule{data.sections && <span className="muted small"> · {data.sections.term}</span>}
+          My schedule
+          {data.sections && <span className="muted small"> · {data.sections.term}</span>}
         </h2>
         <div className="segmented small-seg" role="radiogroup" aria-label="Schedule view">
-          {(["list", "week"] as const).map((v) => (
-            <button key={v} role="radio" aria-checked={view === v} className={view === v ? "on" : ""} onClick={() => setView(v)}>
-              {v === "list" ? "List" : "Week"}
+          {(["day", "week", "list"] as const).map((v) => (
+            <button key={v} role="radio" aria-checked={view === v} className={view === v ? "on" : ""} onClick={() => onView(v)}>
+              {v === "day" ? "Day" : v === "week" ? "Week" : "Courses"}
             </button>
           ))}
         </div>
@@ -114,8 +132,10 @@ export function SchedulePanel({ data, schedule, onDirections }: Props) {
         </p>
       )}
 
-      {view === "week" ? (
-        <WeekView meetings={meetings} colorOf={colorOf} onPick={onDirections} />
+      {view === "day" && meetings.length > 0 ? (
+        <DayView data={data} meetings={meetings} colorOf={colorOf} estimateBetween={estimateBetween} onDirections={onDirections} />
+      ) : view === "week" ? (
+        <WeekView meetings={meetings} colorOf={colorOf} onPick={(m) => onDirections(m)} />
       ) : (
         <ul className="course-list">
           {courses.map((course) => (
@@ -155,7 +175,11 @@ export function SchedulePanel({ data, schedule, onDirections }: Props) {
                         <button className="link" onClick={() => setEditingId(m.id)}>
                           Edit
                         </button>
-                        <button className="icon-btn" aria-label={`Delete ${m.course} ${m.type ?? ""}`} onClick={() => schedule.remove(m.id)}>
+                        <button
+                          className="icon-btn"
+                          aria-label={`Delete ${m.course} ${m.type ?? ""}`}
+                          onClick={() => schedule.remove(m.id)}
+                        >
                           ×
                         </button>
                       </span>
@@ -250,7 +274,12 @@ function CourseAdder({
   const replacing = course && existing.some((m) => m.course === course.code);
 
   const buildingIdForCode = (code: string) => data.buildingByCode.get(code)?.id;
-  const clashes = choice ? findClashes(choice, existing.filter((m) => m.course !== course?.code)) : [];
+  const clashes = choice
+    ? findClashes(
+        choice,
+        existing.filter((m) => m.course !== course?.code),
+      )
+    : [];
 
   return (
     <div className="adder">
@@ -317,7 +346,12 @@ function CourseAdder({
             <button
               className="primary"
               disabled={!choice}
-              onClick={() => onAdd(course, toClassMeetings(course, choice!, buildingIdForCode, () => crypto.randomUUID()))}
+              onClick={() =>
+                onAdd(
+                  course,
+                  toClassMeetings(course, choice!, buildingIdForCode, () => crypto.randomUUID()),
+                )
+              }
             >
               {replacing ? "Replace section" : "Add to schedule"}
             </button>
@@ -499,13 +533,19 @@ function WeekView({
                   <button
                     key={m.id}
                     className="week-block"
-                    style={{ top: pct(s), height: `calc(${pct(e)} - ${pct(s)})`, ["--course" as string]: colorOf(m.course) }}
+                    style={{
+                      top: pct(s),
+                      height: `calc(${pct(e)} - ${pct(s)})`,
+                      ["--course" as string]: colorOf(m.course),
+                    }}
                     title={`${m.course} ${m.type ?? ""} ${m.start}${m.end ? `–${m.end}` : ""}`}
                     onClick={() => onPick(m)}
                     disabled={!m.buildingId}
                   >
                     <strong>{m.course}</strong> {m.type}
-                    <span>{m.buildingCode ?? ""} {m.room ?? ""}</span>
+                    <span>
+                      {m.buildingCode ?? ""} {m.room ?? ""}
+                    </span>
                   </button>
                 );
               })}

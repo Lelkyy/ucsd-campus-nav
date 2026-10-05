@@ -125,6 +125,23 @@ Rooms come from `data/rooms.json` (2025–26, public schedule) plus the private
 Fall 2026 file. Routing goes to the building's door, and the room gets a floor
 pointer (see Room pointers above).
 
+## Your day
+
+The Schedule tab opens on **Day** (`DayView.tsx`, from `dayClasses` in
+`schedule.ts`): any day's classes and that day's exams in order, with a week
+strip to jump between days. Between two classes it shows how long getting from
+one building to the next takes (walking, or by bike / step-free in those modes)
+against the gap, flagged when it's tight. Every class has **Directions**, from
+your location, and every change has **Directions from** the previous class's
+room, both arriving by that day's start (`startOn`) less `CLASS_BUFFER_MIN`. The
+Next class card links to the whole day.
+
+## Map stops
+
+The map shows only the stops a route boards or leaves at. The base map's own
+bus, trolley and station icons are filtered out on load (`poi_transit`, and
+transit classes in the `poi_r*` layers).
+
 ## Search
 
 `CampusSearch` (`packages/core/src/campusSearch.ts`, on

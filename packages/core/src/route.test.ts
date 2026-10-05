@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CampusGraph } from "./graph.ts";
 import { PROFILES, findRoute, findRouteArriveBy } from "./route.ts";
-import { nextClass, type ClassMeeting } from "./schedule.ts";
+import { dayClasses, nextClass, startOn, type ClassMeeting } from "./schedule.ts";
 import { formatCourseCode, searchCourses, sectionChoices, type CourseSections, type SectionsData } from "./sections.ts";
 import { TransitNetwork, type TransitData } from "./transit.ts";
 import { checkBusRoute } from "./plan.ts";
@@ -404,3 +404,26 @@ function inRing([x, y]: LngLat, ring: LngLat[]): boolean {
   }
   return inside;
 }
+
+describe("dayClasses", () => {
+  const meetings: ClassMeeting[] = [
+    { id: "lab", course: "CSE 12", type: "LA", buildingId: "b", days: ["M"], start: "15:00", end: "15:50" },
+    { id: "le", course: "CSE 12", type: "LE", buildingId: "b", days: ["M", "W", "F"], start: "09:00", end: "09:50" },
+    { id: "di", course: "MATH 20C", type: "DI", buildingId: "c", days: ["Tu"], start: "10:00" },
+    { id: "fi", course: "CSE 12", type: "FI", buildingId: "b", days: [], date: "2026-12-07", start: "08:00", end: "10:59" },
+  ];
+
+  it("lists a day's classes in order, with end times", () => {
+    const monday = dayClasses(meetings, new Date(2026, 9, 5, 18, 0)); // Mon Oct 5, in the evening
+    expect(monday.map((c) => c.meeting.id)).toEqual(["le", "lab"]);
+    expect(monday[0].startsAt).toEqual(new Date(2026, 9, 5, 9, 0));
+    expect(monday[0].endsAt).toEqual(new Date(2026, 9, 5, 9, 50));
+    expect(dayClasses(meetings, new Date(2026, 9, 6)).map((c) => c.meeting.id)).toEqual(["di"]);
+    expect(dayClasses(meetings, new Date(2026, 9, 10))).toEqual([]); // Saturday
+  });
+
+  it("includes exams only on their date", () => {
+    expect(dayClasses(meetings, new Date(2026, 11, 7)).map((c) => c.meeting.id)).toEqual(["fi", "le", "lab"]);
+    expect(startOn(meetings[3], new Date(2026, 11, 8))).toBeNull();
+  });
+});

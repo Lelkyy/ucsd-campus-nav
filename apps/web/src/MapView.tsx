@@ -7,6 +7,7 @@ import {
   NavigationControl,
   ScaleControl,
   setWorkerUrl,
+  type ExpressionSpecification,
   type GeoJSONSource,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -120,6 +121,17 @@ export function MapView(props: MapViewProps) {
     };
 
     map.on("load", () => {
+      // The base map's own bus and trolley stop icons are off: the app shows only the stops a route uses.
+      if (map.getLayer("poi_transit")) map.setLayoutProperty("poi_transit", "visibility", "none");
+      for (const id of ["poi_r1", "poi_r7", "poi_r20"]) {
+        const filter = map.getLayer(id) ? map.getFilter(id) : null;
+        const notTransit: ExpressionSpecification = [
+          "all",
+          ["match", ["get", "class"], ["bus", "rail", "railway"], false, true],
+          ["match", ["get", "subclass"], ["bus_stop", "station", "halt", "tram_stop", "platform"], false, true],
+        ];
+        if (filter) map.setFilter(id, ["all", filter as ExpressionSpecification, notTransit]);
+      }
       const firstSymbol = map.getStyle().layers.find((l) => l.type === "symbol")?.id;
       map.addSource("satellite", {
         type: "raster",
