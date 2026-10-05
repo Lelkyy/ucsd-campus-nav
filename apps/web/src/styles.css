@@ -691,3 +691,34 @@ button.start { width: 100%; padding: 11px; font-size: 15px; border-radius: 999px
   font-size: 13px;
 }
 .toggle.small { font-size: 12px; }
+
+/* ---------- Timing + transit options (Google-Maps style) ---------- */
+.timing { display: flex; gap: 8px; }
+.timing select { flex: 0 0 130px; }
+.timing input { flex: 1; }
+.transit { display: flex; flex-direction: column; gap: 10px; }
+.transit-prefs { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 400;
+  background: var(--surface);
+}
+.option.on { border-color: var(--accent); background: var(--accent-soft); }
+.option-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.option-time { font-weight: 650; font-size: 14px; }
+.option-min { font-weight: 700; font-size: 15px; }
+.option-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.option-chain svg { width: 16px; height: 16px; }
+.chain-ride, .chain-walk { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 12px; }
+.chain-ride { color: var(--text); }
+.chain-ride + .chain-ride::before, .chain-walk + .chain-ride::before, .chain-ride + .chain-walk::before { content: "›"; margin-right: 3px; color: var(--muted); }
+.option-fare { margin-left: auto; font-size: 12px; font-weight: 600; color: #16a34a; }
+.option-meta { font-size: 12px; }
+.option-leave { font-size: 12px; font-weight: 600; color: var(--focus); }
+.option-leave.late { color: var(--danger); }

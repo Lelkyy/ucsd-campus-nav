@@ -44,17 +44,28 @@ export type Plan =
     }
   | { ok: false; error: string };
 
-/** Route between two endpoints, snapping free points onto the path network. */
-export function planRoute(graph: CampusGraph, from: Endpoint, to: Endpoint, opts: PlanOptions): Plan {
+export type ResolvedTrip =
+  | { ok: true; start: number[]; targets: number[]; connectors: [LngLat, LngLat][] }
+  | { ok: false; error: string };
+
+/** Graph nodes a trip can start and end at for a given way of travelling. */
+export function resolveTrip(graph: CampusGraph, from: Endpoint, to: Endpoint, profile: Profile): ResolvedTrip {
   const connectors: [LngLat, LngLat][] = [];
-  const accept = opts.profile.travel === "bike" ? graph.onBikeNetwork : graph.onWalkNetwork;
-  const stepFree = opts.profile.speed[EdgeKind.Steps] === 0;
+  const accept = profile.travel === "bike" ? graph.onBikeNetwork : graph.onWalkNetwork;
+  const stepFree = profile.speed[EdgeKind.Steps] === 0;
   const targets = endpointNodes(graph, to, connectors, false, accept, stepFree);
   if (targets.length === 0) return { ok: false, error: "Destination is too far from any mapped path." };
-
   // From a building, the router may leave through any of its exits and picks the best.
   const start = endpointNodes(graph, from, connectors, true, accept, stepFree);
   if (start.length === 0) return { ok: false, error: "Start is too far from any mapped path." };
+  return { ok: true, start, targets, connectors };
+}
+
+/** Route between two endpoints, snapping free points onto the path network. */
+export function planRoute(graph: CampusGraph, from: Endpoint, to: Endpoint, opts: PlanOptions): Plan {
+  const trip = resolveTrip(graph, from, to, opts.profile);
+  if (!trip.ok) return trip;
+  const { start, targets, connectors } = trip;
 
   const route = opts.arriveBy
     ? findRouteArriveBy(graph, start, targets, opts.arriveBy, opts)
@@ -119,16 +130,4 @@ export function checkBusRoute(bus: Route | null, walk: Route | null, arriveBy?: 
     : (walk.arriveAt.getTime() - bus.arriveAt.getTime()) / 60_000;
   if (faster < BUS_RULES.minMinutesFaster) return { ok: false, reason: "Walking is faster for this trip." };
   return { ok: true };
-}
-
-/** The transit option for a trip: the fastest route, used only if it beats walking. */
-export function planTransit(
-  graph: CampusGraph,
-  from: Endpoint,
-  to: Endpoint,
-  opts: Omit<PlanOptions, "walkWeight">,
-  walk: Route | null,
-): { plan: Plan; check: BusCheck } {
-  const plan = planRoute(graph, from, to, { ...opts, walkWeight: 1 });
-  return { plan, check: checkBusRoute(plan.ok ? plan.route : null, walk, opts.arriveBy) };
 }

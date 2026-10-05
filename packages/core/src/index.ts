@@ -11,3 +11,4 @@ export * from "./instructions.ts";
 export * from "./nav.ts";
 export * from "./indoor.ts";
 export * from "./fares.ts";
+export * from "./transitOptions.ts";

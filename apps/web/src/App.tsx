@@ -2,9 +2,10 @@ import {
   MODES,
   buildSteps,
   formatFare,
-  planTransit,
   routeLabel,
+  transitOptions,
   tripFare,
+  type TransitPreference,
   insideHints,
   endpointLabel,
   endpointPosition,
@@ -36,6 +37,8 @@ import {
 } from "./Icons.tsx";
 import { InsideCard } from "./InsideCard.tsx";
 import { NavigationView } from "./NavigationView.tsx";
+import { TimingControl, type TimingState } from "./TimingControl.tsx";
+import { TransitPanel } from "./TransitPanel.tsx";
 import { PlaceNamer } from "./PlaceNamer.tsx";
 import { ReportPanel, type RouteContext } from "./ReportPanel.tsx";
 import { useSavedPlaces } from "./useSavedPlaces.ts";
@@ -63,8 +66,15 @@ export function App() {
 
   const [from, setFromRaw] = useState<Endpoint | null>(null);
   const [to, setToRaw] = useState<Endpoint | null>(null);
-  /** Set when routing to a class: plan backwards from its start time. */
-  const [arriveBy, setArriveBy] = useState<{ at: Date; label: string } | null>(null);
+  /** Leave now, depart at a time, or arrive by a time (e.g. a class start). */
+  const [timing, setTiming] = useState<TimingState>({ kind: "now" });
+  const arriveBy = timing.kind === "arrive" ? { at: timing.at, label: timing.label } : null;
+  const departAt = timing.kind === "depart" ? timing.at : undefined;
+  const setArriveBy = (a: { at: Date; label?: string } | null) => setTiming(a ? { kind: "arrive", ...a } : { kind: "now" });
+  /** Transit choices: preference, step-free, and which option is selected. */
+  const [transitPref, setTransitPref] = useState<TransitPreference>(() => storage.get("campus-nav:transit-pref", "best"));
+  const [transitStepFree, setTransitStepFree] = useState<boolean>(() => storage.get("campus-nav:transit-stepfree", false));
+  const [selectedOption, setSelectedOption] = useState(0);
   const [clickTarget, setClickTarget] = useState<"from" | "to">("from");
   /** UC San Diego students ride MTS free with the U-Pass; assume a student unless told otherwise. */
   const [upass, setUpass] = useState<boolean>(() => storage.get("campus-nav:upass", true));
@@ -122,71 +132,82 @@ export function App() {
   useEffect(() => storage.set("campus-nav:mode", mode), [mode]);
   useEffect(() => storage.set("campus-nav:upass", upass), [upass]);
 
+  useEffect(() => storage.set("campus-nav:transit-pref", transitPref), [transitPref]);
+  useEffect(() => storage.set("campus-nav:transit-stepfree", transitStepFree), [transitStepFree]);
+
   const planFor = useCallback(
-    (m: ModeId, a: Endpoint, b: Endpoint, when: Date | undefined): Plan | null =>
+    (m: ModeId, a: Endpoint, b: Endpoint, when: Date | undefined, leaveAt?: Date): Plan | null =>
       data
         ? planRoute(data.graph, a, b, {
             profile: MODES[m].profile,
             transit: MODES[m].transit ? data.transit : null,
             walkWeight: MODES[m].walkWeight,
             arriveBy: when,
+            departAt: leaveAt,
           })
         : null,
     [data],
   );
 
-  // The bus is only offered when it's a realistic alternative to walking this trip.
-  /** Transit for a trip: the least-walking realistic option, compared with walking. */
+  /** Google-Maps-style transit choices for a trip (walking included when it's competitive). */
   const transitFor = useCallback(
-    (a: Endpoint, b: Endpoint, when: Date | undefined) => {
-      if (!data) return null;
-      const walkPlan = planFor("walk", a, b, when);
-      const walkRoute = walkPlan?.ok ? walkPlan.route : null;
-      const t = planTransit(data.graph, a, b, { profile: MODES.bus.profile, transit: data.transit, arriveBy: when }, walkRoute);
-      return { plan: t.plan, check: t.check, walkPlan, walkRoute };
-    },
-    [data, planFor],
+    (a: Endpoint, b: Endpoint, t: { arriveBy?: Date; departAt?: Date }) =>
+      data
+        ? transitOptions(data.graph, a, b, { transit: data.transit, timing: t, preference: transitPref, stepFree: transitStepFree })
+        : null,
+    [data, transitPref, transitStepFree],
   );
-  const bus = useMemo(() => (from && to ? transitFor(from, to, arriveBy?.at) : null), [transitFor, from, to, arriveBy]);
-  const busUnavailable = bus && !bus.check.ok ? bus.check.reason : null;
+  const transitResult = useMemo(
+    () => (from && to ? transitFor(from, to, { arriveBy: arriveBy?.at, departAt }) : null),
+    [transitFor, from, to, arriveBy?.at, departAt],
+  );
+  // A new trip, time or preference starts from the top option.
+  useEffect(() => setSelectedOption(0), [transitResult]);
+  const transitOpts = transitResult?.options ?? [];
+  const bestTransit = transitOpts.find((o) => !o.walkOnly) ?? null;
+  const busUnavailable = transitResult && !bestTransit ? "No shuttle, bus or trolley route found for this trip." : null;
+  const transitPlan: Plan | null = transitOpts[selectedOption]
+    ? { ok: true, route: transitOpts[selectedOption].route, connectors: transitResult!.connectors }
+    : transitResult?.error
+      ? { ok: false, error: transitResult.error }
+      : null;
 
+  const walkPlan = useMemo(() => (from && to ? planFor("walk", from, to, arriveBy?.at, departAt) : null), [planFor, from, to, arriveBy?.at, departAt]);
   // "No stairs" is only offered when a step-free route exists.
   const stepFreePlan = useMemo(
-    () => (from && to ? planFor("accessible", from, to, arriveBy?.at) : null),
-    [planFor, from, to, arriveBy],
+    () => (from && to ? planFor("accessible", from, to, arriveBy?.at, departAt) : null),
+    [planFor, from, to, arriveBy?.at, departAt],
   );
   const noStairsUnavailable = stepFreePlan && !stepFreePlan.ok ? "Every route there has stairs." : null;
-  const bikePlan = useMemo(() => (from && to ? planFor("bike", from, to, arriveBy?.at) : null), [planFor, from, to, arriveBy]);
+  const bikePlan = useMemo(() => (from && to ? planFor("bike", from, to, arriveBy?.at, departAt) : null), [planFor, from, to, arriveBy?.at, departAt]);
 
   /** Each mode's option for this trip: its plan, or why it isn't offered. */
   const options: Record<ModeId, { plan: Plan | null; unavailable: string | null }> = {
-    walk: { plan: bus?.walkPlan ?? null, unavailable: null },
+    walk: { plan: walkPlan, unavailable: null },
     accessible: { plan: stepFreePlan, unavailable: noStairsUnavailable },
     bike: { plan: bikePlan, unavailable: null },
-    bus: { plan: bus?.plan ?? null, unavailable: busUnavailable },
+    bus: { plan: bestTransit ? { ok: true, route: bestTransit.route, connectors: [] } : null, unavailable: busUnavailable },
   };
 
   const plan = useMemo(() => {
     if (!from || !to) return null;
-    // Bus picked but not realistic for this trip: show the walk instead (and say why).
-    if (mode === "bus") return busUnavailable ? (bus?.walkPlan ?? null) : (bus?.plan ?? null);
+    // Transit with no transit route at all: show the walk instead (and say why).
+    if (mode === "bus") return busUnavailable ? walkPlan : transitPlan;
     // Likewise "No stairs" with no step-free route: show the walk, with a note.
-    if (mode === "accessible") return noStairsUnavailable ? (bus?.walkPlan ?? null) : stepFreePlan;
-    return planFor(mode, from, to, arriveBy?.at);
-  }, [planFor, mode, from, to, arriveBy, bus, busUnavailable, stepFreePlan, noStairsUnavailable]);
+    if (mode === "accessible") return noStairsUnavailable ? walkPlan : stepFreePlan;
+    if (mode === "walk") return walkPlan;
+    return bikePlan;
+  }, [from, to, mode, busUnavailable, walkPlan, transitPlan, noStairsUnavailable, stepFreePlan, bikePlan]);
   const route = plan?.ok ? plan.route : null;
 
-  // Walking: point out a realistic shuttle that saves a good chunk of walking.
-  // Walking: point out transit when it's clearly faster (or the only way there).
+  // Walking: point out transit when it's clearly faster.
   const busSuggestion = useMemo(() => {
-    if ((mode !== "walk" && mode !== "accessible") || !bus?.check.ok || !bus.plan?.ok) return null;
-    const busRoute = bus.plan.route;
-    if (!route) return { route: busRoute, savedMin: null };
+    if ((mode !== "walk" && mode !== "accessible") || !bestTransit || !route) return null;
     const saved = arriveBy
-      ? (busRoute.leaveAt.getTime() - route.leaveAt.getTime()) / 60_000
-      : (route.arriveAt.getTime() - busRoute.arriveAt.getTime()) / 60_000;
-    return saved >= SUGGEST_MIN_FASTER ? { route: busRoute, savedMin: Math.round(saved) } : null;
-  }, [mode, bus, route, arriveBy]);
+      ? (bestTransit.route.leaveAt.getTime() - route.leaveAt.getTime()) / 60_000
+      : (route.arriveAt.getTime() - bestTransit.route.arriveAt.getTime()) / 60_000;
+    return saved >= SUGGEST_MIN_FASTER ? { route: bestTransit.route, savedMin: Math.round(saved) } : null;
+  }, [mode, bestTransit, route, arriveBy]);
 
   /** When to leave the current start for a class (null without a start or a route). */
   const estimateClass = useCallback(
@@ -197,10 +218,8 @@ export function App() {
       const arrive = new Date(startsAt.getTime() - CLASS_BUFFER_MIN * 60_000);
       const dest: Endpoint = { kind: "building", building };
       if (mode === "bus" || (building.access === "shuttle" && mode !== "bike")) {
-        // Same rule as the Bus button: only take the shuttle when it's realistic.
-        const t = transitFor(start, dest, arrive);
-        if (!t) return null;
-        return t.check.ok && t.plan.ok ? t.plan.route : t.walkRoute;
+        // The top transit option, as in the Transit list.
+        return transitFor(start, dest, { arriveBy: arrive })?.options[0]?.route ?? null;
       }
       const p = planFor(mode, start, dest, arrive);
       if (p?.ok) return p.route;
@@ -474,7 +493,8 @@ export function App() {
                 })}
               </div>
 
-              {arriveBy && (
+              <TimingControl value={timing} onChange={setTiming} />
+              {arriveBy?.label && (
                 <p className="note">
                   Arriving by <strong>{formatTime(arriveBy.at)}</strong> for {arriveBy.label}.{" "}
                   <button className="link" onClick={() => setArriveBy(null)}>
@@ -484,7 +504,22 @@ export function App() {
               )}
               {hint && <p className="note warn-note">{hint}</p>}
               {mode === "bus" && busUnavailable && (
-                <p className="note warn-note">No realistic transit for this trip: {busUnavailable.toLowerCase()} Showing the walk.</p>
+                <p className="note warn-note">{busUnavailable} Showing the walk.</p>
+              )}
+              {mode === "bus" && !busUnavailable && transitOpts.length > 0 && data && (
+                <TransitPanel
+                  options={transitOpts}
+                  selected={selectedOption}
+                  onSelect={setSelectedOption}
+                  preference={transitPref}
+                  onPreference={setTransitPref}
+                  stepFree={transitStepFree}
+                  onStepFree={setTransitStepFree}
+                  transit={data.transit}
+                  fares={data.transit.data.fares}
+                  upass={upass}
+                  arriving={!!arriveBy}
+                />
               )}
               {mode === "accessible" && noStairsUnavailable && (
                 <p className="note warn-note">There's no step-free route to this destination. Showing the route with stairs.</p>
@@ -509,7 +544,7 @@ export function App() {
                   <Itinerary
                     route={route}
                     destination={endpointLabel(to)}
-                    showLeave={!!arriveBy}
+                    showLeave={timing.kind !== "now"}
                     fare={tripFare(route, data.transit.data.fares, { upass })}
                     upass={upass}
                     onUpass={setUpass}

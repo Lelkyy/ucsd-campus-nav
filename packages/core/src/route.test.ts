@@ -6,6 +6,7 @@ import { nextClass, type ClassMeeting } from "./schedule.ts";
 import { formatCourseCode, searchCourses, sectionChoices, type CourseSections, type SectionsData } from "./sections.ts";
 import { TransitNetwork, type TransitData } from "./transit.ts";
 import { checkBusRoute } from "./plan.ts";
+import { transitOptions } from "./transitOptions.ts";
 import { EdgeKind, type Building, type GraphData } from "./types.ts";
 
 // Small synthetic graph, ~111 m per 0.001° of latitude:
@@ -234,6 +235,26 @@ describe("bus mode: minimise walking", () => {
     // No transit in the route at all.
     const walkR = findRoute(g, 0, [1], { departAt: at(10) })!;
     expect(checkBusRoute(walkR, walkR).ok).toBe(false);
+  });
+
+  it("lists walking and transit as options, ordered by the chosen preference", () => {
+    const building = (node: number, id: string): Building => ({
+      id,
+      name: id,
+      aliases: [],
+      center: g.coord(node),
+      targets: [node],
+      entranceCount: 0,
+      access: "walk",
+    });
+    const from = { kind: "building" as const, building: building(0, "A") };
+    const to = { kind: "building" as const, building: building(1, "B") };
+    // Leaving 10:00: walking (~14 min) arrives first; the 10:15 bus walks less.
+    const best = transitOptions(g, from, to, { transit, timing: { departAt: at(10) } }).options;
+    expect(best.map((o) => o.walkOnly)).toEqual([true, false]);
+    const lessWalking = transitOptions(g, from, to, { transit, timing: { departAt: at(10) }, preference: "less-walking" }).options;
+    expect(lessWalking[0].walkOnly).toBe(false);
+    expect(lessWalking[0].boardings).toBe(1);
   });
 
   it("merges a loop that continues as its next run into one ride", () => {

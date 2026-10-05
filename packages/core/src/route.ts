@@ -106,6 +106,8 @@ export interface RouteOptions {
    * the trip takes longer (e.g. 10: one minute less walking is worth ten minutes).
    */
   walkWeight?: number;
+  /** Perceived cost of each boarding in seconds (default 60). Higher = fewer transfers. */
+  boardPenalty?: number;
 }
 
 /** A stretch on foot or by bike. */
@@ -133,6 +135,9 @@ export interface BusLeg {
   stopCount: number;
   departs: Date;
   arrives: Date;
+  /** Timetable pattern and the boarding position in it (for "every N min"). */
+  pattern: number;
+  fromPos: number;
 }
 
 export type Leg = MoveLeg | BusLeg;
@@ -180,6 +185,7 @@ export function findRoute(
   const transit = profile.travel === "walk" ? (opts.transit ?? null) : null;
   const departAt = opts.departAt ?? new Date();
   const walkWeight = transit ? (opts.walkWeight ?? 1) : 1;
+  const boardPenalty = opts.boardPenalty ?? BOARD_PENALTY_S;
   if (targets.length === 0 || starts.length === 0) return null;
 
   const n = graph.nodeCount;
@@ -262,7 +268,7 @@ export function findRoute(
       const times = pat.trips[trip].times;
       for (let q = p + 1; q < pat.stops.length; q++) {
         const t = times[q] - base;
-        const c = cost[u] + (t - clock[u]) + BOARD_PENALTY_S;
+        const c = cost[u] + (t - clock[u]) + boardPenalty;
         relax(n + pat.stops[q], u, c, t, { kind: "ride", pattern, trip, fromPos: p, toPos: q });
       }
     }
@@ -320,6 +326,8 @@ function buildRoute(
         stopCount: step.toPos - step.fromPos,
         departs: at(times[step.fromPos]),
         arrives: at(times[step.toPos]),
+        pattern: step.pattern,
+        fromPos: step.fromPos,
       });
     } else {
       if (!move) legs.push((move = newMove(last)));
