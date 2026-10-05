@@ -28,7 +28,7 @@ import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { BuildingSearch } from "./BuildingSearch.tsx";
 import { loadCampus, storage, type CampusData } from "./data.ts";
 import { Itinerary, formatDistance, formatTime } from "./Itinerary.tsx";
-import { KIND_COLORS, MapView, type RouteLine } from "./MapView.tsx";
+import { KIND_COLORS, MapView, type DayOverlay, type RouteLine } from "./MapView.tsx";
 import {
   BikeIcon,
   BusIcon,
@@ -77,6 +77,8 @@ export function App() {
   /** The drawn inside view of the destination building is open. */
   /** Height of the room pointer in the map's corner, so the map buttons sit below it. */
   const [insetHeight, setInsetHeight] = useState(0);
+  /** The day view's walks and classes, drawn on the map while it's open. */
+  const [dayOverlay, setDayOverlay] = useState<DayOverlay | null>(null);
   const [scheduleView, setScheduleView] = useState<ScheduleView>(() => storage.get<ScheduleView>("campus-nav:schedule-view", "day"));
   useEffect(() => storage.set("campus-nav:schedule-view", scheduleView), [scheduleView]);
   /** Indoor maps plus rooms pinned on this device (pins win over guesses). */
@@ -329,6 +331,8 @@ export function App() {
       />
     ) : null;
 
+  // The day view takes over the map: its walks and classes instead of the current route.
+  const showingDay = tab === "schedule" && scheduleView === "day" && !!dayOverlay && !navigating;
   // Only the stops the route gets on or off at; the rest of the network stays off the map.
   const routeStops = useMemo(
     () => [...new Map((route?.legs ?? []).flatMap((l) => (l.mode === "bus" ? [l.from, l.to] : [])).map((s) => [s.id, s])).values()],
@@ -429,12 +433,13 @@ export function App() {
       {data && (
         <MapView
           graph={data.graph}
-          routeLines={routeLines}
-          connectors={plan?.ok ? plan.connectors : []}
-          stops={routeStops}
-          showStops={routeStops.length > 0}
-          from={from ? endpointPosition(from) : null}
-          to={to ? endpointPosition(to) : null}
+          routeLines={showingDay ? null : routeLines}
+          day={showingDay ? dayOverlay : null}
+          connectors={plan?.ok && !showingDay ? plan.connectors : []}
+          stops={showingDay ? [] : routeStops}
+          showStops={!showingDay && routeStops.length > 0}
+          from={from && !showingDay ? endpointPosition(from) : null}
+          to={to && !showingDay ? endpointPosition(to) : null}
           showNetwork={showNetwork}
           bikeNetwork={mode === "bike"}
           showSatellite={showSatellite}
@@ -470,7 +475,7 @@ export function App() {
         )}
       </div>
 
-      {destBuilding && destRoom && !pinning && (
+      {destBuilding && destRoom && !pinning && !showingDay && (
         <RoomPointer key={`${destBuilding.id}-${destRoom}`} building={destBuilding} room={destRoom} floor={destFloor} onHeight={setInsetHeight} />
       )}
 
@@ -735,6 +740,7 @@ export function App() {
               onView={setScheduleView}
               estimateBetween={estimateBetween}
               onDirections={onDirections}
+              onDayOverlay={setDayOverlay}
             />
           ) : (
             <ReportPanel

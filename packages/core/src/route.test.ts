@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CampusGraph } from "./graph.ts";
 import { PROFILES, findRoute, findRouteArriveBy } from "./route.ts";
-import { dayClasses, nextClass, startOn, type ClassMeeting } from "./schedule.ts";
+import { dayClasses, defaultPick, groupOverlaps, nextClass, startOn, type ClassMeeting } from "./schedule.ts";
 import { formatCourseCode, searchCourses, sectionChoices, type CourseSections, type SectionsData } from "./sections.ts";
 import { TransitNetwork, type TransitData } from "./transit.ts";
 import { checkBusRoute } from "./plan.ts";
@@ -425,5 +425,35 @@ describe("dayClasses", () => {
   it("includes exams only on their date", () => {
     expect(dayClasses(meetings, new Date(2026, 11, 7)).map((c) => c.meeting.id)).toEqual(["fi", "le", "lab"]);
     expect(startOn(meetings[3], new Date(2026, 11, 8))).toBeNull();
+  });
+});
+
+describe("groupOverlaps", () => {
+  const at = (h: number, m = 0) => new Date(2026, 9, 5, h, m);
+  const cls = (id: string, start: Date, end?: Date, type = "LE") => ({
+    meeting: { id, course: id, type, buildingId: "b", days: [], start: "", date: "" } as ClassMeeting,
+    startsAt: start,
+    ...(end ? { endsAt: end } : {}),
+  });
+
+  it("keeps back-to-back classes apart and groups overlapping ones", () => {
+    const groups = groupOverlaps([
+      cls("a", at(9), at(9, 50)),
+      cls("b", at(10), at(10, 50)), // starts after a ends
+      cls("c", at(10, 30), at(11, 20)), // overlaps b
+      cls("d", at(11), at(11, 50)), // overlaps c (so joins b's group)
+      cls("e", at(11, 50), at(12, 40)), // starts as d ends
+    ]);
+    expect(groups.map((g) => g.map((c) => c.meeting.id))).toEqual([["a"], ["b", "c", "d"], ["e"]]);
+  });
+
+  it("assumes 50 minutes when there's no end time", () => {
+    expect(groupOverlaps([cls("a", at(9)), cls("b", at(9, 45))]).length).toBe(1);
+    expect(groupOverlaps([cls("a", at(9)), cls("b", at(9, 50))]).length).toBe(2);
+  });
+
+  it("picks an exam over a class, else the earlier one", () => {
+    expect(defaultPick([cls("le", at(9)), cls("fi", at(9, 30), at(11), "FI")]).meeting.id).toBe("fi");
+    expect(defaultPick([cls("x", at(9)), cls("y", at(9, 30))]).meeting.id).toBe("x");
   });
 });

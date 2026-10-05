@@ -33,7 +33,8 @@ the way, using the paths, stairs and bike paths students actually use.
   corner. Students can pin a room's exact spot for the next person.
 - **Your whole day:** see any day's classes in order, how long each walk between
   them takes and whether the gap is enough, and get directions to any class,
-  from where you are or from the class before.
+  from where you are or from the class before. Overlapping classes show as a
+  conflict to choose from, and the day's walks are drawn on the map.
 - **Search that understands campus:** "WLH 2001", "wlh2001", "CSE 11", "giesel"
   (typos are fine), building codes, old names and the names students use.
 - **Student place names:** search "Revelle bus stop", "GTC" and other names

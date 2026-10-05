@@ -87,6 +87,36 @@ export function dayClasses(meetings: ClassMeeting[], day: Date): DayClass[] {
     .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || a.meeting.course.localeCompare(b.meeting.course));
 }
 
+/** When a class ends: its end time, or 50 minutes after it starts when the schedule has none. */
+export function classEnd(c: DayClass): Date {
+  return c.endsAt ?? new Date(c.startsAt.getTime() + 50 * 60_000);
+}
+
+/**
+ * A day's classes grouped by overlap: a group of one is a normal class; more
+ * than one is a conflict (A overlaps B and B overlaps C makes one group).
+ */
+export function groupOverlaps(classes: DayClass[]): DayClass[][] {
+  const sorted = [...classes].sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  const groups: DayClass[][] = [];
+  let groupEnd = -Infinity;
+  for (const c of sorted) {
+    if (groups.length && c.startsAt.getTime() < groupEnd) groups[groups.length - 1].push(c);
+    else {
+      groups.push([c]);
+      groupEnd = -Infinity;
+    }
+    groupEnd = Math.max(groupEnd, classEnd(c).getTime());
+  }
+  return groups;
+}
+
+/** Which class of a conflict to go to unless you choose: an exam, else the one that starts first. */
+export function defaultPick(group: DayClass[]): DayClass {
+  const exam = group.find((c) => c.meeting.type === "FI" || c.meeting.type === "MI");
+  return exam ?? group[0];
+}
+
 /** "YYYY-MM-DD" in local time. */
 export function isoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

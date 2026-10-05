@@ -821,3 +821,14 @@ button.start { width: 100%; padding: 11px; font-size: 15px; border-radius: 999px
   .day-class > button { grid-column: 1 / -1; justify-self: start; }
   .day-leg { padding-left: 20px; }
 }
+.day-conflict { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1.5px dashed var(--danger); border-radius: var(--radius-sm); }
+.day-conflict-head { font-size: 12px; color: var(--danger); }
+.day-conflict-note { margin: 0; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--warn-bg); color: var(--warn-text); font-size: 13px; }
+.day-class.pickable { cursor: pointer; }
+.day-class.pickable:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.day-class.skipped { opacity: 0.6; border-left-style: dashed; background: none; }
+.day-radio { display: inline-block; width: 14px; height: 14px; margin-right: 6px; border-radius: 50%; border: 2px solid var(--muted); vertical-align: -2px; }
+.day-radio.on { border-color: var(--course, var(--accent)); background: radial-gradient(var(--course, var(--accent)) 45%, transparent 50%); }
+.day-badge.skip { background: var(--muted); }
+.day-chip-clash { color: var(--danger); font-weight: 700; }
+.day-chip.on .day-chip-clash { color: inherit; }

@@ -45,9 +45,18 @@ setWorkerUrl(workerUrl);
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
+/** A day's classes on the map: the walks between them, and a numbered pin per class. */
+export interface DayOverlay {
+  lines: { coordinates: LngLat[]; color: string }[];
+  /** One pin per building; `n` lists the class numbers there ("1, 4"), `label` one line per class. */
+  stops: { lngLat: LngLat; n: string; label: string; color: string }[];
+}
+
 export interface MapViewProps {
   graph: CampusGraph;
   routeLines: RouteLine[] | null;
+  /** The day view's walks and classes (drawn instead of a route). */
+  day?: DayOverlay | null;
   connectors: [LngLat, LngLat][];
   stops: TransitStop[];
   showStops: boolean;
@@ -145,7 +154,7 @@ export function MapView(props: MapViewProps) {
         firstSymbol,
       );
 
-      for (const id of ["network", "route", "connectors", "stops", "doors"]) {
+      for (const id of ["network", "route", "connectors", "stops", "doors", "day"]) {
         map.addSource(id, { type: "geojson", data: EMPTY });
       }
       map.addLayer({
@@ -216,6 +225,50 @@ export function MapView(props: MapViewProps) {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": ["get", "color"], "line-width": 7 },
       });
+      // The day view: dotted walks between classes in the next class's color, numbered pins.
+      map.addLayer({
+        id: "day-line",
+        type: "line",
+        source: "day",
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": ["get", "color"], "line-width": 6, "line-dasharray": [0.01, 1.6] },
+      });
+      map.addLayer({
+        id: "day-stop",
+        type: "circle",
+        source: "day",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-radius": ["case", [">", ["length", ["get", "n"]], 1], 15, 11],
+          "circle-color": ["get", "color"],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2.5,
+        },
+      });
+      map.addLayer({
+        id: "day-stop-n",
+        type: "symbol",
+        source: "day",
+        filter: ["==", ["geometry-type"], "Point"],
+        layout: { "text-field": ["get", "n"], "text-font": ["Noto Sans Regular"], "text-size": 11, "text-allow-overlap": true },
+        paint: { "text-color": "#ffffff" },
+      });
+      map.addLayer({
+        id: "day-stop-label",
+        type: "symbol",
+        source: "day",
+        filter: ["==", ["geometry-type"], "Point"],
+        layout: {
+          "text-field": ["get", "label"],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 12,
+          "text-offset": [0, 1.5],
+          "text-anchor": "top",
+          "text-optional": true,
+        },
+        paint: { "text-color": "#1f2937", "text-halo-color": "#ffffff", "text-halo-width": 1.6 },
+      });
       map.addLayer({
         id: "doors",
         type: "circle",
@@ -273,6 +326,33 @@ export function MapView(props: MapViewProps) {
       })),
     });
   }, [ready, props.stops]);
+
+  // The day view's walks and pins, framed whenever the day (or the choice of classes) changes.
+  const lastDay = useRef("");
+  useEffect(() => {
+    if (!ready) return;
+    const map = mapRef.current!;
+    const day = props.day;
+    source(map, "day").setData({
+      type: "FeatureCollection",
+      features: [
+        ...(day?.lines ?? []).map((l) => ({ ...lineFeature(l.coordinates), properties: { color: l.color } })),
+        ...(day?.stops ?? []).map((s) => ({
+          type: "Feature" as const,
+          properties: { n: s.n, label: s.label, color: s.color },
+          geometry: { type: "Point" as const, coordinates: s.lngLat },
+        })),
+      ],
+    });
+    const pts = [...(day?.lines ?? []).flatMap((l) => l.coordinates), ...(day?.stops ?? []).map((s) => s.lngLat)];
+    const key = JSON.stringify(day?.stops.map((s) => s.lngLat) ?? []);
+    if (pts.length && key !== lastDay.current) {
+      const bounds = new LngLatBounds(pts[0], pts[0]);
+      for (const p of pts) bounds.extend(p);
+      map.fitBounds(bounds, { padding: fitPadding(), maxZoom: 17.5, duration: 600 });
+    }
+    lastDay.current = key;
+  }, [ready, props.day]);
 
   useEffect(() => {
     if (!ready) return;

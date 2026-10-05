@@ -136,6 +136,13 @@ your location, and every change has **Directions from** the previous class's
 room, both arriving by that day's start (`startOn`) less `CLASS_BUFFER_MIN`. The
 Next class card links to the whole day.
 
+Classes that overlap (`groupOverlaps`; no end time counts as 50 minutes) show
+as a conflict to choose from: an exam, else the earliest, until you pick, and
+the pick is kept per day in `localStorage` (`campus-nav:conflict-choices`). The
+walks between classes follow your picks, and while the Day view is open the map
+shows them (dotted, in the next class's color) with a numbered pin per building
+("1, 4" when two classes share one) instead of the current route.
+
 ## Map stops
 
 The map shows only the stops a route boards or leaves at. The base map's own
