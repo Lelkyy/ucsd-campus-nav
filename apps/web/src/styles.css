@@ -1,78 +1,37 @@
 /* ---------- Tokens ----------
-   Palette "Evergreen Dreams": deep olive #595E48, sage #919682, light sage
-   #C7CDBF, clay #C7A491, blush #EECFCA (also in palette.ts for the map). */
+   One light theme on the Triton Trails logo's backdrop (pale lime #F2F8B6),
+   with its forest greens for text and actions, and the Evergreen palette's
+   clay, blush and sage for accents (palette.ts holds the same for the map). */
 :root {
-  --olive: #595e48;
-  --olive-deep: #3b3f2f;
   --sage: #919682;
   --sage-light: #c7cdbf;
   --clay: #c7a491;
   --blush: #eecfca;
   --rose: #b4655b;
-  /* From the Triton Trails logo. */
+  --olive-deep: #17301b;
   --brand: #17301b;
 
-  --bg: #f3eee8;
-  --surface: #fdfbf8;
-  --surface-2: #f2ede6;
-  --text: #2b2e24;
-  --muted: #73776a;
-  --border: #e3ddd3;
-  --accent: var(--olive);
-  --accent-text: #fdfbf8;
-  --accent-soft: #e6e9df;
-  --focus: var(--olive);
+  --bg: #f2f8b6;
+  --surface: #fbfdea;
+  --surface-2: #f1f6d2;
+  --text: #17301b;
+  --muted: #5e6b50;
+  --border: #dfe7b7;
+  --accent: #2f5a2e;
+  --accent-text: #fbfdea;
+  --accent-soft: #e3edc0;
+  --focus: #2f5a2e;
   --highlight: var(--clay);
-  --ok: #5f6a4a;
+  --ok: #4c7a2a;
   --danger: var(--rose);
-  --warn-bg: #f7e4e0;
+  --warn-bg: #f8e4dc;
   --warn-text: #7d3f36;
-  --shadow: 0 18px 40px rgb(59 63 47 / 0.14), 0 2px 8px rgb(59 63 47 / 0.08);
+  --shadow: 0 18px 40px rgb(23 48 27 / 0.14), 0 2px 8px rgb(23 48 27 / 0.08);
   --radius: 20px;
   --radius-sm: 12px;
   --font: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
   color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #15170f;
-    --surface: #1f2219;
-    --surface-2: #292d21;
-    --text: #ece7df;
-    --muted: #a7ab9b;
-    --border: #353a2b;
-    --accent: var(--sage-light);
-    --brand: #dfe8c9;
-    --accent-text: #1f2219;
-    --accent-soft: #303628;
-    --focus: var(--sage-light);
-    --ok: #b9c3a6;
-    --danger: #e3a196;
-    --warn-bg: #3a2925;
-    --warn-text: var(--blush);
-    --shadow: 0 18px 40px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.35);
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #15170f;
-  --surface: #1f2219;
-  --surface-2: #292d21;
-  --text: #ece7df;
-  --muted: #a7ab9b;
-  --border: #353a2b;
-  --accent: var(--sage-light);
-  --brand: #dfe8c9;
-  --accent-text: #1f2219;
-  --accent-soft: #303628;
-  --focus: var(--sage-light);
-  --ok: #b9c3a6;
-  --danger: #e3a196;
-  --warn-bg: #3a2925;
-  --warn-text: var(--blush);
-  --shadow: 0 18px 40px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.35);
-  color-scheme: dark;
 }
 
 /* ---------- Base ---------- */
@@ -196,7 +155,7 @@ button.link.danger { color: var(--danger); }
   color: var(--muted);
   font-size: 13px;
 }
-.tabs button.on { color: var(--text); background: var(--surface-2); }
+.tabs button.on { color: var(--accent); background: var(--accent-soft); }
 .tabs .count {
   margin-left: 5px;
   padding: 0 5px;
@@ -274,7 +233,7 @@ button.link.danger { color: var(--danger); }
 }
 .trip-rail { display: flex; flex-direction: column; align-items: center; padding: 15px 0; }
 .trip-rail .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-.trip-rail .dot.start { border: 2.5px solid var(--sage); }
+.trip-rail .dot.start { border: 2.5px solid var(--ok); }
 .trip-rail .dot.end { background: var(--rose); }
 .trip-rail .line { flex: 1; width: 2px; margin: 3px 0; background: repeating-linear-gradient(var(--border) 0 3px, transparent 3px 6px); }
 .trip-fields { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -324,11 +283,12 @@ button.link.danger { color: var(--danger); }
   background: var(--surface);
   color: var(--muted);
 }
-.modes button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
-.modes button.on svg { color: var(--accent); }
+.modes button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.modes button.on svg { color: var(--accent-text); }
 .mode-label { font-size: 12px; font-weight: 600; }
 .mode-eta { font-size: 12px; font-weight: 500; color: var(--muted); }
-.modes button.on .mode-eta { color: var(--text); }
+.modes button.on .mode-eta { color: var(--accent-text); opacity: 0.85; }
+.modes button.on .mode-fare { color: #d8f0a0; }
 
 .suggest {
   display: grid;
@@ -659,7 +619,7 @@ button.start { width: 100%; padding: 11px; font-size: 15px; border-radius: 999px
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--olive);
+  background: var(--accent);
   border: 3px solid #fff;
   box-shadow: 0 0 0 6px rgb(89 94 72 / 0.25), 0 1px 4px rgb(0 0 0 / 0.3);
 }

@@ -148,12 +148,15 @@ shows them (dotted, in the next class's color) with a numbered pin per building
 
 ## Design
 
-Palette "Evergreen Dreams" (deep olive #595E48, sage #919682, light sage
-#C7CDBF, clay #C7A491, blush #EECFCA): CSS custom properties in `styles.css`
-(light and dark), and `palette.ts` for the map and course colors. The base map
-is recolored to match on load (`tintBaseMap`: linen ground, sage parks, clay
-major roads), and its lowest-rank point icons are hidden to keep campus clean.
-Type: Fraunces for headings, DM Sans for everything else (Google Fonts).
+One light theme (no dark mode) on the Triton Trails logo's backdrop, pale lime
+#F2F8B6, with its forest greens for text and actions (#17301B, #2F5A2E) and the
+Evergreen palette's clay, blush and sage for accents: CSS custom properties in
+`styles.css`, and `palette.ts` for the map and course colors. The base map is
+recolored around the logo on load (`tintBaseMap`: lime ground, rich greens for
+parks and canyons, clear blue water, golden roads); walking routes get a white
+underlay so they read over green. Type: DM Sans (the wordmark is DM Sans bold),
+Fraunces for a few headings. The logo files are in `apps/web/public/`
+(`logo.png`, `logo-mark.png`, `favicon.png`, `apple-touch-icon.png`).
 
 ## Map stops
 

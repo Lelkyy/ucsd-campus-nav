@@ -119,8 +119,6 @@ export function MapView(props: MapViewProps) {
 
     map.on("load", () => {
       tintBaseMap(map);
-      // The least important points of interest (rank 20+) crowd campus with icons; the rest stay.
-      if (map.getLayer("poi_r20")) map.setLayoutProperty("poi_r20", "visibility", "none");
       // The base map's own bus and trolley stop icons are off: the app shows only the stops a route uses.
       if (map.getLayer("poi_transit")) map.setLayoutProperty("poi_transit", "visibility", "none");
       for (const id of ["poi_r1", "poi_r7", "poi_r20"]) {
@@ -179,6 +177,15 @@ export function MapView(props: MapViewProps) {
         filter: ["!=", ["get", "kind"], "walk"],
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": PALETTE.oliveDeep, "line-width": 11 },
+      });
+      // A soft white underlay so the dotted walk stays readable over parks and buildings.
+      map.addLayer({
+        id: "route-walk-halo",
+        type: "line",
+        source: "route",
+        filter: ["==", ["get", "kind"], "walk"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": PALETTE.white, "line-width": 11, "line-opacity": 0.75 },
       });
       map.addLayer({
         id: "route",
@@ -418,25 +425,25 @@ function lineFeature(coords: LngLat[]): GeoJSON.Feature<GeoJSON.LineString> {
 }
 
 /**
- * Recolor the base map to the app's palette: warm linen ground, sage parks and
- * grass, muted water, soft clay major roads instead of yellow, warm buildings.
+ * Recolor the base map around the logo's colors: its pale lime ground, rich
+ * greens for parks, grass and canyons, clear blue water, warm golden roads.
  */
 const BASE_TINTS: [RegExp, "background-color" | "fill-color" | "line-color" | "fill-extrusion-color", string][] = [
-  [/^background$/, "background-color", "#f4efe8"],
-  [/^park$/, "fill-color", "#dde3d2"],
-  [/^landcover_grass$/, "fill-color", "#d3dac5"],
-  [/^landcover_wood$/, "fill-color", "#c8d0b8"],
-  [/^landuse_(pitch|track|cemetery)$/, "fill-color", "#e1e5d6"],
-  [/^landuse_school$/, "fill-color", "#ece8dc"],
-  [/^landuse_hospital$/, "fill-color", "#f3e3de"],
-  [/^landuse_residential$/, "fill-color", "#efe9e0"],
-  [/^water$/, "fill-color", "#c3d3cf"],
-  [/^waterway_/, "line-color", "#b2c6c1"],
-  [/_casing$/, "line-color", "#d9cfc2"],
-  [/^(road|bridge|tunnel)_(motorway|motorway_link)$/, "line-color", "#e8cfbc"],
-  [/^(road|bridge|tunnel)_(trunk_primary|secondary_tertiary|link)$/, "line-color", "#f3e6d8"],
-  [/^building$/, "fill-color", "#e4ddd2"],
-  [/^building-3d$/, "fill-extrusion-color", "#e4ddd2"],
+  [/^background$/, "background-color", "#f4f8d6"],
+  [/^park$/, "fill-color", "#c6e2a2"],
+  [/^landcover_grass$/, "fill-color", "#b4d88c"],
+  [/^landcover_wood$/, "fill-color", "#9cca78"],
+  [/^landuse_(pitch|track|cemetery)$/, "fill-color", "#cde6a9"],
+  [/^landuse_school$/, "fill-color", "#eef3c4"],
+  [/^landuse_hospital$/, "fill-color", "#f7d9d2"],
+  [/^landuse_residential$/, "fill-color", "#ecf1cc"],
+  [/^water$/, "fill-color", "#8ec5e6"],
+  [/^waterway_/, "line-color", "#78b4da"],
+  [/_casing$/, "line-color", "#d1b98c"],
+  [/^(road|bridge|tunnel)_(motorway|motorway_link)$/, "line-color", "#f4b860"],
+  [/^(road|bridge|tunnel)_(trunk_primary|secondary_tertiary|link)$/, "line-color", "#ffe39a"],
+  [/^building$/, "fill-color", "#ddd5c0"],
+  [/^building-3d$/, "fill-extrusion-color", "#ddd5c0"],
 ];
 
 function tintBaseMap(map: MlMap) {
