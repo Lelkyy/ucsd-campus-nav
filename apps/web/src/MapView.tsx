@@ -20,10 +20,11 @@ const BASE_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 const SATELLITE_TILES =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 const CAMPUS_CENTER: LngLat = [-117.2376, 32.8801];
-/** A little room around the campus data's bounding box so edge buildings aren't flush to the screen edge. */
-const CAMPUS_PADDING_DEG = 0.002;
-/** Roughly "whole campus on a laptop screen". */
-const MIN_ZOOM = 14;
+/** Room around the campus data's bounding box: enough to see the shore and ocean to the west. */
+const CAMPUS_PADDING_DEG = 0.006;
+/** Campus and the coast on a laptop screen. */
+const MIN_ZOOM = 13.5;
+const START_ZOOM = 15.6;
 
 /** One drawn piece of a route: walking (dotted blue), riding (green) or a shuttle (its route color). */
 export interface RouteLine {
@@ -85,17 +86,13 @@ export function MapView(props: MapViewProps) {
   callbacks.current = props;
 
   useEffect(() => {
-    // Keep the map on campus: no panning away, no zooming out past it.
-    const [w, sth, e, n] = props.graph.data.bbox;
+    // Keep the map on campus (and its shore), but let every edge be panned out from under the panel.
     const map = new MlMap({
       container: container.current!,
       style: BASE_STYLE,
-      center: CAMPUS_CENTER,
-      zoom: 15.6,
-      maxBounds: [
-        [w - CAMPUS_PADDING_DEG, sth - CAMPUS_PADDING_DEG],
-        [e + CAMPUS_PADDING_DEG, n + CAMPUS_PADDING_DEG],
-      ],
+      center: visibleCenter(CAMPUS_CENTER, START_ZOOM),
+      zoom: START_ZOOM,
+      maxBounds: campusBounds(props.graph.data.bbox),
       minZoom: MIN_ZOOM,
       attributionControl: { compact: true },
     });
@@ -395,6 +392,36 @@ export function MapView(props: MapViewProps) {
 }
 
 /** Room around a fitted route so it isn't hidden under the panel (desktop) or sheet (phone). */
+/** Map pixels per degree of longitude at a zoom level. */
+function pxPerDegree(zoom: number): number {
+  return (256 * 2 ** zoom) / 360;
+}
+
+/**
+ * How far the map may pan: the campus data's box plus some coast, plus as much
+ * again as the panel covers (on the left on a laptop, the bottom on a phone),
+ * so nothing is stuck under the search panel.
+ */
+function campusBounds([w, s, e, n]: [number, number, number, number]): [[number, number], [number, number]] {
+  const pad = fitPadding();
+  const perDeg = pxPerDegree(MIN_ZOOM);
+  const cos = Math.cos((((s + n) / 2) * Math.PI) / 180);
+  const lon = (px: number) => px / perDeg;
+  const lat = (px: number) => (px * cos) / perDeg;
+  return [
+    [w - CAMPUS_PADDING_DEG - lon(pad.left), s - CAMPUS_PADDING_DEG - lat(pad.bottom)],
+    [e + CAMPUS_PADDING_DEG + lon(pad.right), n + CAMPUS_PADDING_DEG + lat(pad.top)],
+  ];
+}
+
+/** The map center that puts `at` in the middle of the part of the map the panel doesn't cover. */
+function visibleCenter(at: LngLat, zoom: number): LngLat {
+  const pad = fitPadding();
+  const perDeg = pxPerDegree(zoom);
+  const cos = Math.cos((at[1] * Math.PI) / 180);
+  return [at[0] - (pad.left - pad.right) / 2 / perDeg, at[1] - ((pad.bottom - pad.top) / 2) * (cos / perDeg)];
+}
+
 function fitPadding() {
   if (window.innerWidth > 760) return { top: 60, right: 70, bottom: 60, left: 440 };
   return { top: 70, right: 40, bottom: Math.round(window.innerHeight * 0.5), left: 40 };
