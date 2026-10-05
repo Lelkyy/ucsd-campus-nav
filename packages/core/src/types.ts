@@ -53,13 +53,19 @@ export interface Entrance {
   label?: string;
 }
 
-/** A room mapped indoors in OpenStreetMap (only a few buildings have these). */
+/** An indoor space: a room or corridor mapped in OpenStreetMap, or a room students pinned. */
 export interface IndoorRoom {
-  ref: string;
+  /** Room number ("1202"); missing for unlabelled rooms and corridors. */
+  ref?: string;
   name?: string;
-  /** OSM level=*, e.g. "0", "2", "-1". */
+  /** OSM level=*, e.g. "0", "2", "-1", "0-3", "-1;0;1". */
   level?: string;
   center: LngLat;
+  /** Floor-plan outline, when mapped as an area. */
+  outline?: LngLat[];
+  kind: "room" | "corridor" | "area";
+  /** "osm": mapped in OpenStreetMap; "pinned": a student marked where it is (data/room-locations.json). */
+  source: "osm" | "pinned";
 }
 
 /** Building id -> its mapped rooms. */

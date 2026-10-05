@@ -76,10 +76,18 @@ Ask Leonid for the files. Don't commit them or the generated
   `wheelchair=yes`, and a room mapped indoors pulls the route to the nearest door.
   Floors come from mapped rooms (`indoor=room` + `level`) when available,
   otherwise from the room number (first digit; `B…` is basement), labelled as a guess.
-- Indoor data is thin: rooms are mapped in OSM for the CSE building and a couple
-  of residences, entrances on ~48 buildings. UCSD's official floor plans aren't
-  public. Mapping entrances (`entrance=main`, `wheelchair=yes`) and elevators in
-  OSM directly improves the app; good ticket material.
+- **Floor plans:** where OSM has indoor rooms/corridors (`indoor=room|corridor|area`
+  with `level`), the map draws that floor and highlights the destination room,
+  with a floor switcher. OSM's level 0 is the ground floor, shown as "Floor 1".
+  Today that's the CSE building (EBU3B, ~370 spaces) and the Cala residence.
+- **Room pins:** for every other building, students can "Pin this room": tap its
+  spot, pick the floor. It's saved on their device right away and emailed to the
+  map team as an entry for `data/room-locations.json` (`"CODE ROOM": { at, level }`),
+  which the build adds for everyone.
+- Getting exact rooms everywhere needs either indoor mapping in OSM (from
+  sources OSM allows) or UCSD's floor plans, which sit behind the Facilities
+  Information System and need Facilities' permission. Entrances (`entrance=main`,
+  `wheelchair=yes`) and elevators in OSM also help; good ticket material.
 
 ## Student place names
 

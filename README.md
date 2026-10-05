@@ -28,9 +28,9 @@ the way, using the paths, stairs and bike paths students actually use.
 - **Live directions:** press Start for turn-by-turn navigation that follows your
   GPS ("In 120 ft, turn left onto Library Walk"), re-routes when you go off
   course, can speak instructions, and keeps the screen on.
-- **Inside the building:** which door to use (main or wheelchair-accessible doors
-  when mapped), which floor the room is on (from the map where rooms are mapped,
-  otherwise from the room number), and elevators.
+- **Inside the building:** which door to use, which floor, elevators, and the
+  exact room: drawn on the floor plan where the building is mapped indoors (the
+  CSE building today), or pinned by students everywhere else ("Pin this room").
 - **Student place names:** search "Revelle bus stop", "GTC" and other names
   students use. Name any spot yourself, and suggest names for everyone.
 - **Report a problem:** tap the spot on the map, pick what's wrong, and send it

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { CampusGraph } from "./graph.ts";
-import { entranceTargets, floorFromRoom, insideHints } from "./indoor.ts";
+import { entranceTargets, findRoom, floorFromRoom, floorPlan, floorToLevel, insideHints, levelLabel, levelsOf } from "./indoor.ts";
 import { buildSteps } from "./instructions.ts";
 import { RouteTracker, currentStepIndex } from "./nav.ts";
 import { PROFILES, findRoute } from "./route.ts";
 import { searchPlaces } from "./search.ts";
-import { EdgeKind, type Building, type Place } from "./types.ts";
+import { EdgeKind, type Building, type IndoorRoom, type Place } from "./types.ts";
 
 describe("floorFromRoom", () => {
   it.each([
@@ -110,5 +110,40 @@ describe("searchPlaces", () => {
   it("finds student names and stops, student names first", () => {
     expect(searchPlaces(places, "revelle").map((p) => p.id)).toEqual(["a", "b"]);
     expect(searchPlaces(places, "revelle stop")[0].id).toBe("a");
+  });
+});
+
+describe("indoor floors", () => {
+  it("reads OSM levels, including ranges and lists", () => {
+    expect(levelsOf("2")).toEqual([2]);
+    expect(levelsOf("0-3")).toEqual([0, 1, 2, 3]);
+    expect(levelsOf("-1;0;1")).toEqual([-1, 0, 1]);
+    expect(levelsOf(undefined)).toEqual([]);
+  });
+
+  it("labels OSM levels with US floor numbers", () => {
+    expect(levelLabel("0")).toBe("Floor 1 (ground)");
+    expect(levelLabel("2")).toBe("Floor 3");
+    expect(levelLabel("-1")).toBe("Basement");
+    expect(floorToLevel("3")).toBe(2);
+    expect(floorToLevel("B")).toBe(-1);
+  });
+
+  const rooms: IndoorRoom[] = [
+    { ref: "3109", level: "2", center: [0, 0], outline: [[0, 0], [0, 1], [1, 1], [0, 0]], kind: "room", source: "osm" },
+    { level: "2", center: [0, 0], outline: [[0, 0], [1, 0], [1, 1], [0, 0]], kind: "corridor", source: "osm" },
+    { ref: "1202", level: "0", center: [0, 0], outline: [[0, 0], [0, 1], [1, 1], [0, 0]], kind: "room", source: "osm" },
+    { ref: "3109", level: "2", center: [5, 5], kind: "room", source: "pinned" },
+  ];
+
+  it("finds rooms, preferring a student's pin", () => {
+    expect(findRoom(rooms, "3109")?.source).toBe("pinned");
+    expect(findRoom(rooms, "1202")?.level).toBe("0");
+    expect(findRoom(rooms, "9999")).toBeUndefined();
+  });
+
+  it("draws one floor at a time", () => {
+    expect(floorPlan(rooms, 2).map((r) => r.kind)).toEqual(["room", "corridor"]);
+    expect(floorPlan(rooms, 0).map((r) => r.ref)).toEqual(["1202"]);
   });
 });

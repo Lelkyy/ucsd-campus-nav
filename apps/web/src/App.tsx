@@ -1,6 +1,10 @@
 import {
   MODES,
   buildSteps,
+  findRoom,
+  floorPlan,
+  levelsOf,
+  type IndoorData,
   formatFare,
   routeLabel,
   transitOptions,
@@ -39,7 +43,9 @@ import { InsideCard } from "./InsideCard.tsx";
 import { NavigationView } from "./NavigationView.tsx";
 import { TimingControl, type TimingState } from "./TimingControl.tsx";
 import { TransitPanel } from "./TransitPanel.tsx";
+import { PinRoomForm } from "./PinRoomForm.tsx";
 import { PlaceNamer } from "./PlaceNamer.tsx";
+import { useRoomPins } from "./useRoomPins.ts";
 import { ReportPanel, type RouteContext } from "./ReportPanel.tsx";
 import { useSavedPlaces } from "./useSavedPlaces.ts";
 import { NextUp, SchedulePanel } from "./SchedulePanel.tsx";
@@ -60,6 +66,28 @@ export function App() {
   const [tab, setTab] = useState<Tab>("go");
   const schedule = useSchedule();
   const saved = useSavedPlaces();
+  const roomPins = useRoomPins();
+  /** Pinning where a room is ("Pin this room"): which room, and the spot tapped. */
+  const [pinning, setPinning] = useState<{ key: string } | null>(null);
+  const [pinAt, setPinAt] = useState<LngLat | null>(null);
+  /** Floor shown on the destination's floor plan (null = the room's floor), and camera moves. */
+  const [planLevel, setPlanLevel] = useState<number | null>(null);
+  const [focus, setFocus] = useState<{ at: LngLat; zoom: number; key: number } | null>(null);
+  /** Indoor maps plus rooms pinned on this device (pins win over guesses). */
+  const indoor = useMemo<IndoorData>(() => {
+    if (!data) return {};
+    const merged: IndoorData = { ...data.indoor };
+    for (const [key, pin] of Object.entries(roomPins.pins)) {
+      const [code, ...rest] = key.split(" ");
+      const building = data.buildingByCode.get(code) ?? data.buildingById.get(code);
+      if (!building) continue;
+      merged[building.id] = [
+        ...(merged[building.id] ?? []),
+        { ref: rest.join(" "), level: pin.level, center: pin.at, kind: "room", source: "pinned", name: pin.note },
+      ];
+    }
+    return merged;
+  }, [data, roomPins.pins]);
   /** Live turn-by-turn navigation, and your position while it's running. */
   const [navigating, setNavigating] = useState(false);
   const [userPos, setUserPos] = useState<LngLat | null>(null);
@@ -107,9 +135,14 @@ export function App() {
   /** Point a building destination at its room, when the room is mapped indoors. */
   const withRoom = (e: Endpoint | null): Endpoint | null => {
     if (e?.kind !== "building" || !e.room || !data) return e;
-    const room = data.indoor[e.building.id]?.find((r) => r.ref.toUpperCase() === e.room!.toUpperCase());
+    const room = findRoom(indoor[e.building.id], e.room);
     return room ? { ...e, roomAt: room.center } : e;
   };
+
+  // A room pinned (or newly mapped) while it's the destination: route to the door nearest it.
+  useEffect(() => {
+    setToRaw((t) => (t?.kind === "building" && t.room && !t.roomAt ? withRoom(t) : t));
+  }, [indoor]);
 
   const reload = useCallback(async (bust: boolean) => {
     try {
@@ -234,9 +267,26 @@ export function App() {
   const steps = useMemo(() => (data && route && to ? buildSteps(data.graph, route, endpointLabel(to)) : []), [data, route, to]);
   const destBuilding = to?.kind === "building" ? to.building : null;
   const inside = useMemo(
-    () => (data && destBuilding && route ? insideHints(destBuilding, to?.kind === "building" ? to.room : undefined, data.indoor[destBuilding.id], route) : null),
-    [data, destBuilding, to, route],
+    () => (data && destBuilding && route ? insideHints(destBuilding, to?.kind === "building" ? to.room : undefined, indoor[destBuilding.id], route) : null),
+    [data, destBuilding, to, route, indoor],
   );
+
+  // The destination's floor plan, on the room's floor unless another floor is picked.
+  const destRoom = to?.kind === "building" ? to.room : undefined;
+  const planRooms = destBuilding ? indoor[destBuilding.id] : undefined;
+  const planLevels = useMemo(
+    () => [...new Set((planRooms ?? []).filter((r) => r.source === "osm" && r.outline).flatMap((r) => levelsOf(r.level)))].sort((a, b) => a - b),
+    [planRooms],
+  );
+  const roomLevel = inside?.mappedRoom ? levelsOf(inside.mappedRoom.level)[0] : undefined;
+  const shownLevel = planLevel ?? roomLevel ?? (planLevels.includes(0) ? 0 : planLevels[0]);
+  const floorPlanData =
+    planLevels.length && shownLevel !== undefined
+      ? { rooms: floorPlan(planRooms, shownLevel), target: shownLevel === roomLevel ? destRoom : undefined }
+      : null;
+  useEffect(() => setPlanLevel(null), [destBuilding?.id, destRoom]);
+  const roomKey = (building: { id: string; aliases: string[] }, room: string) =>
+    `${building.aliases.find((a) => /^[A-Z0-9-]{2,6}$/.test(a)) ?? building.id} ${room}`;
   const tips = useMemo(() => {
     if (!data || !destBuilding) return [];
     const codes = destBuilding.aliases.filter((a) => /^[A-Z0-9-]{2,6}$/.test(a));
@@ -245,7 +295,29 @@ export function App() {
   }, [data, destBuilding, to]);
   const insideCard =
     destBuilding && inside ? (
-      <InsideCard buildingName={destBuilding.name} hints={inside} stepFree={mode === "accessible"} tips={tips} />
+      <InsideCard
+        buildingName={destBuilding.name}
+        hints={inside}
+        stepFree={mode === "accessible"}
+        tips={tips}
+        onShowRoom={
+          inside.roomAt
+            ? () => {
+                setPlanLevel(null);
+                setFocus({ at: inside.roomAt!, zoom: 19.4, key: Date.now() });
+              }
+            : undefined
+        }
+        onPinRoom={
+          destRoom
+            ? () => {
+                setPinning({ key: roomKey(destBuilding, destRoom) });
+                setPinAt(null);
+                setFocus({ at: destBuilding.center, zoom: 18.6, key: Date.now() });
+              }
+            : undefined
+        }
+      />
     ) : null;
 
   const routeLines: RouteLine[] | null = route
@@ -278,6 +350,7 @@ export function App() {
   const onMapClick = (p: LngLat) => {
     if (!data) return;
     if (tab === "report") return setReportPin(p);
+    if (pinning) return setPinAt(p);
     const pin: Endpoint = { kind: "point", lngLat: p, label: "Dropped pin" };
     if (clickTarget === "from") {
       setFrom(pin);
@@ -342,8 +415,10 @@ export function App() {
           showNetwork={showNetwork}
           bikeNetwork={mode === "bike"}
           showSatellite={showSatellite}
-          reportPin={tab === "report" ? reportPin : null}
-          pickingSpot={tab === "report"}
+          reportPin={tab === "report" ? reportPin : pinning ? pinAt : null}
+          pickingSpot={tab === "report" || !!pinning}
+          floorPlan={floorPlanData}
+          focus={focus}
           userPos={navigating ? userPos : null}
           follow={navigating}
           doors={(destBuilding?.entrances ?? []).map((d) => ({ lngLat: d.lngLat, used: d === inside?.entrance }))}
@@ -360,6 +435,15 @@ export function App() {
         <button className={`map-chip ${showNetwork ? "on" : ""}`} aria-pressed={showNetwork} onClick={() => setShowNetwork((v) => !v)}>
           <PathsIcon /> Paths
         </button>
+        {floorPlanData && planLevels.length > 0 && (
+          <div className="floor-switch" role="radiogroup" aria-label="Floor">
+            {[...planLevels].reverse().map((l) => (
+              <button key={l} role="radio" aria-checked={l === shownLevel} className={l === shownLevel ? "on" : ""} onClick={() => setPlanLevel(l)}>
+                {l < 0 ? "B" : l + 1}
+              </button>
+            ))}
+          </div>
+        )}
         {showNetwork && (
           <div className="legend">
             <span style={{ ["--c" as string]: KIND_COLORS[0] }}>Path</span>
@@ -538,6 +622,18 @@ export function App() {
                   </span>
                   <button onClick={() => setMode("bus")}>Take it</button>
                 </div>
+              )}
+              {pinning && (
+                <PinRoomForm
+                  key={pinning.key}
+                  roomKey={pinning.key}
+                  at={pinAt}
+                  onSave={(pin) => roomPins.save(pinning.key, pin)}
+                  onCancel={() => {
+                    setPinning(null);
+                    setPinAt(null);
+                  }}
+                />
               )}
               {route && to && (
                 <>

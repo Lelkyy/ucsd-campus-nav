@@ -23,6 +23,7 @@ import {
   type CourseSections,
   type Entrance,
   type IndoorData,
+  type IndoorRoom,
   type LngLat,
   type PlacesData,
   type SectionsData,
@@ -40,6 +41,7 @@ const BLOCKED_PATH = join(ROOT, "data/blocked-ways.json");
 const CODES_PATH = join(ROOT, "data/building-codes.json");
 const ROOMS_PATH = join(ROOT, "data/rooms.json");
 const PLACES_PATH = join(ROOT, "data/places.json");
+const ROOM_PINS_PATH = join(ROOT, "data/room-locations.json");
 const FARES_PATH = join(ROOT, "data/fares.json");
 /** Current-term schedule exported from TSS (login-only, so kept out of git). */
 const PRIVATE_DIR = join(ROOT, "data/private");
@@ -261,10 +263,10 @@ async function main() {
   const elevatorPts = raw.elements
     .filter((el): el is OsmNode => el.type === "node" && el.tags?.highway === "elevator")
     .map((n) => [n.lon, n.lat] as LngLat);
-  const indoorRooms = raw.elements.flatMap((el) => {
-    if (el.tags?.indoor !== "room") return [];
-    const ref = el.tags.ref ?? el.tags.name;
-    if (!ref) return [];
+  // Indoor rooms, corridors and areas (floor plans), where OpenStreetMap has them.
+  const indoorRooms = raw.elements.flatMap((el): IndoorRoom[] => {
+    const kind = el.tags?.indoor;
+    if (kind !== "room" && kind !== "corridor" && kind !== "area") return [];
     const pts =
       el.type === "node"
         ? [[el.lon, el.lat] as LngLat]
@@ -272,8 +274,19 @@ async function main() {
           ? toLine(el.geometry)
           : el.members.flatMap((m) => (m.geometry ? toLine(m.geometry) : []));
     if (!pts.length) return [];
-    const center: LngLat = [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length];
-    return [{ ref, name: el.tags.ref ? el.tags.name : undefined, level: el.tags.level, center }];
+    const ring = pts.length > 3 ? pts.slice(0, -1) : pts;
+    const center: LngLat = [ring.reduce((s, p) => s + p[0], 0) / ring.length, ring.reduce((s, p) => s + p[1], 0) / ring.length];
+    return [
+      {
+        ref: el.tags!.ref ?? (kind === "room" ? el.tags!.name : undefined),
+        name: el.tags!.ref ? el.tags!.name : undefined,
+        level: el.tags!.level,
+        center,
+        outline: el.type === "way" && pts.length > 3 ? pts : undefined,
+        kind,
+        source: "osm",
+      },
+    ];
   });
   const inBuilding = (b: RawBuilding, p: LngLat) => b.lines.some((ring) => ring.length > 3 && pointInRing(p, ring));
 
@@ -407,7 +420,11 @@ async function main() {
     const levels = Number(b.tags["building:levels"]);
     const rooms = indoorRooms.filter((r) => inBuilding(b, r.center));
     if (rooms.length) {
-      indoor[b.id] = rooms.map((r) => ({ ...r, center: [round(r.center[0]), round(r.center[1])] as LngLat }));
+      indoor[b.id] = rooms.map((r) => ({
+        ...r,
+        center: [round(r.center[0]), round(r.center[1])] as LngLat,
+        outline: r.outline?.map(([x, y]) => [round(x), round(y)] as LngLat),
+      }));
     }
     buildings.push({
       id: b.id,
@@ -489,6 +506,17 @@ async function main() {
   }
   buildings.sort((a, b) => a.name.localeCompare(b.name));
 
+  // Rooms students pinned ("CODE ROOM" -> spot + floor), for buildings without indoor maps.
+  const pins = existsSync(ROOM_PINS_PATH)
+    ? (JSON.parse(readFileSync(ROOM_PINS_PATH, "utf8")) as { rooms: Record<string, { at: LngLat; level?: string; note?: string }> }).rooms
+    : {};
+  for (const [key, pin] of Object.entries(pins)) {
+    const [code, ...rest] = key.trim().split(/\s+/);
+    const building = buildings.find((bd) => bd.aliases.includes(code));
+    if (!building || !rest.length) throw new Error(`data/room-locations.json: "${key}" should be "CODE ROOM" with a known building code`);
+    (indoor[building.id] ??= []).push({ ref: rest.join(" "), level: pin.level, center: pin.at, kind: "room", source: "pinned", name: pin.note });
+  }
+
   // --- Write.
   const [s, w, n, e] = BBOX;
   const graph: GraphData = {
@@ -529,7 +557,7 @@ async function main() {
         `${buildings.filter((b) => b.entranceCount > 0).length} with mapped entrances (${offCampusCount} off-campus skipped)`,
       `transit: ${new Set(transit.patterns.map((p) => p.route)).size} routes in use, ${transit.stops.length} stops, ${transit.patterns.reduce((sum, p) => sum + p.trips.length, 0)} trips`,
       `doors: ${buildings.reduce((n, b) => n + (b.entrances?.length ?? 0), 0)} mapped on ${buildings.filter((b) => b.entrances).length} buildings; ` +
-        `elevators in ${buildings.filter((b) => b.elevators).length}; indoor rooms in ${Object.keys(indoor).length} (${Object.values(indoor).flat().length} rooms)`,
+        `elevators in ${buildings.filter((b) => b.elevators).length}; indoor maps in ${Object.keys(indoor).length} buildings (${Object.values(indoor).flat().filter((r) => r.ref && r.source === "osm").length} numbered rooms, ${Object.values(indoor).flat().filter((r) => r.source === "pinned").length} pinned)`,
       `places: ${places.places.filter((p) => p.kind === "lingo").length} student place names, ${places.places.filter((p) => p.kind === "stop").length} stops, ${Object.keys(places.tips).length} tips`,
       unreachable.length ? `UNREACHABLE campus buildings: ${unreachable.join(", ")}` : "every campus building is reachable",
       roomsData
@@ -633,7 +661,7 @@ async function fetchOsm(): Promise<void> {
   relation["building"]["name"](${bbox});
   node["entrance"](${bbox});
   node["highway"="elevator"](${bbox});
-  nwr["indoor"="room"](${bbox});
+  nwr["indoor"~"^(room|corridor|area)$"](${bbox});
   way["amenity"="university"](${bbox});
   relation["amenity"="university"](${bbox});
 );

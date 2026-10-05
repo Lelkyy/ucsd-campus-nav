@@ -1,4 +1,4 @@
-import { EdgeKind, type CampusGraph, type LngLat, type TransitStop } from "@campus/core";
+import { EdgeKind, type CampusGraph, type IndoorRoom, type LngLat, type TransitStop } from "@campus/core";
 import {
   GeolocateControl,
   LngLatBounds,
@@ -65,6 +65,10 @@ export interface MapViewProps {
   doors: { lngLat: LngLat; used: boolean }[];
   /** A mapped indoor room to point at, with its label. */
   room: { lngLat: LngLat; label: string } | null;
+  /** One floor of a building's indoor map, with the destination room highlighted. */
+  floorPlan: { rooms: IndoorRoom[]; target?: string } | null;
+  /** Fly the camera here (bump `key` to repeat). */
+  focus: { at: LngLat; zoom: number; key: number } | null;
   /** Taps mark a spot rather than set a route endpoint: show a crosshair. */
   pickingSpot: boolean;
   onMapClick: (p: LngLat) => void;
@@ -130,7 +134,7 @@ export function MapView(props: MapViewProps) {
         firstSymbol,
       );
 
-      for (const id of ["network", "route", "connectors", "stops", "doors"]) {
+      for (const id of ["network", "route", "connectors", "stops", "doors", "floorplan"]) {
         map.addSource(id, { type: "geojson", data: EMPTY });
       }
       map.addLayer({
@@ -175,6 +179,40 @@ export function MapView(props: MapViewProps) {
           "text-max-width": 9,
         },
         paint: { "text-color": "#4b3aa8", "text-halo-color": "#fff", "text-halo-width": 1.5 },
+      });
+      // Floor plan (indoor rooms and corridors), under the route.
+      map.addLayer({
+        id: "fp-fill",
+        type: "fill",
+        source: "floorplan",
+        minzoom: 16.5,
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: {
+          "fill-color": ["case", ["get", "target"], "#7c3aed", ["==", ["get", "kind"], "room"], "#ffffff", "#e9edf2"],
+          "fill-opacity": ["case", ["get", "target"], 0.65, 0.92],
+        },
+      });
+      map.addLayer({
+        id: "fp-line",
+        type: "line",
+        source: "floorplan",
+        minzoom: 16.5,
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: { "line-color": ["case", ["get", "target"], "#5b21b6", "#94a3b8"], "line-width": ["case", ["get", "target"], 2.5, 1] },
+      });
+      map.addLayer({
+        id: "fp-labels",
+        type: "symbol",
+        source: "floorplan",
+        minzoom: 18.3,
+        filter: ["==", ["geometry-type"], "Point"],
+        layout: {
+          "text-field": ["get", "ref"],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": ["case", ["get", "target"], 13, 10],
+          "text-allow-overlap": false,
+        },
+        paint: { "text-color": ["case", ["get", "target"], "#ffffff", "#475569"], "text-halo-color": ["case", ["get", "target"], "#5b21b6", "#ffffff"], "text-halo-width": 1.2 },
       });
       // Walking legs are dotted; rides are solid (bike green, shuttle in the route's color).
       map.addLayer({
@@ -309,6 +347,29 @@ export function MapView(props: MapViewProps) {
     if (!map || !props.follow || !props.userPos) return;
     map.easeTo({ center: props.userPos, zoom: Math.max(map.getZoom(), 17.5), duration: 600, padding: fitPadding() });
   }, [props.follow, props.userPos]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const plan = props.floorPlan;
+    const isTarget = (r: IndoorRoom) => !!plan?.target && r.ref?.toUpperCase() === plan.target.toUpperCase();
+    source(mapRef.current!, "floorplan").setData({
+      type: "FeatureCollection",
+      features: (plan?.rooms ?? []).flatMap((r): GeoJSON.Feature[] => [
+        {
+          type: "Feature",
+          properties: { kind: r.kind, target: isTarget(r) },
+          geometry: { type: "Polygon", coordinates: [r.outline!] },
+        },
+        ...(r.ref ? [{ type: "Feature" as const, properties: { ref: r.ref, target: isTarget(r) }, geometry: { type: "Point" as const, coordinates: r.center } }] : []),
+      ]),
+    });
+  }, [ready, props.floorPlan]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !props.focus) return;
+    map.flyTo({ center: props.focus.at, zoom: props.focus.zoom, duration: 900, padding: fitPadding() });
+  }, [props.focus]);
 
   useEffect(() => {
     if (!ready) return;
