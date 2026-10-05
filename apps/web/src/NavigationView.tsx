@@ -8,6 +8,8 @@ import { storage } from "./data.ts";
 const OFF_ROUTE_M = 35;
 /** Within this of the end counts as arrived. */
 const ARRIVE_M = 15;
+/** This close to the end, show the way inside the building. */
+const NEAR_M = 60;
 /** Say the next instruction when it's about this far away. */
 const ANNOUNCE_AHEAD_M = 45;
 /** Simulation: walk the route this many times faster than real time. */
@@ -19,6 +21,8 @@ interface Props {
   destination: string;
   /** Shown on arrival ("Inside the building"). */
   arrival: ReactNode;
+  /** Called once, when you get close to the destination. */
+  onNear?: () => void;
   onPosition: (p: LngLat | null) => void;
   /** Off route: plan again from here. */
   onReroute: (p: LngLat) => void;
@@ -32,7 +36,7 @@ type GpsState = "waiting" | "ok" | "denied" | "unavailable";
  * shows (and optionally speaks) the next instruction, re-routes when you go
  * off course, and tells you when you've arrived.
  */
-export function NavigationView({ route, steps, destination, arrival, onPosition, onReroute, onEnd }: Props) {
+export function NavigationView({ route, steps, destination, arrival, onNear, onPosition, onReroute, onEnd }: Props) {
   const tracker = useMemo(() => new RouteTracker(route.coordinates), [route]);
   const [along, setAlong] = useState(0);
   const [manualStep, setManualStep] = useState<number | null>(null);
@@ -42,6 +46,8 @@ export function NavigationView({ route, steps, destination, arrival, onPosition,
   const offCount = useRef(0);
   const alongRef = useRef(0);
   const announced = useRef(new Set<string>());
+  /** Once per trip, even if you're re-routed on the way in. */
+  const nearShown = useRef(false);
 
   useEffect(() => storage.set("campus-nav:voice", voice), [voice]);
 
@@ -124,6 +130,15 @@ export function NavigationView({ route, steps, destination, arrival, onPosition,
   const remaining = Math.max(0, tracker.total - along);
   const remainingMin = route.minutes * (remaining / Math.max(1, tracker.total));
   const eta = new Date(Date.now() + remainingMin * 60_000);
+
+  // Close to the building: open the way inside.
+  // Without GPS, stepping through to the last instruction counts as getting there.
+  const near = ((gps === "ok" || simulating) && remaining <= NEAR_M) || (manualStep !== null && manualStep >= steps.length - 2);
+  useEffect(() => {
+    if (!onNear || nearShown.current || !near) return;
+    nearShown.current = true;
+    onNear();
+  }, [onNear, near]);
 
   // Voice: say each instruction once as you approach it, and announce arrival.
   useEffect(() => {

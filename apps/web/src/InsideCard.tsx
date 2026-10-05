@@ -9,6 +9,7 @@ export function InsideCard({
   tips,
   onShowRoom,
   onPinRoom,
+  onOpenInside,
 }: {
   buildingName: string;
   hints: InsideHints;
@@ -18,6 +19,8 @@ export function InsideCard({
   onShowRoom?: () => void;
   /** Start marking where an unmapped room is. */
   onPinRoom?: () => void;
+  /** Open the drawing of the building's inside. */
+  onOpenInside?: () => void;
 }) {
   const rows: [string, ReactNode][] = [];
   if (hints.enterBy) rows.push(["Enter", <>Use {hints.enterBy}.</>]);
@@ -69,7 +72,14 @@ export function InsideCard({
   if (!rows.length) return null;
   return (
     <section className="inside" aria-label={`Inside ${buildingName}`}>
-      <h3>Inside {buildingName}</h3>
+      <div className="inside-head">
+        <h3>Inside {buildingName}</h3>
+        {onOpenInside && (
+          <button className="link" onClick={onOpenInside}>
+            Open inside view
+          </button>
+        )}
+      </div>
       <dl>
         {rows.map(([k, v], i) => (
           <div key={i}>

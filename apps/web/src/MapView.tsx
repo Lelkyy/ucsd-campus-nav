@@ -66,7 +66,8 @@ export interface MapViewProps {
   /** A mapped indoor room to point at, with its label. */
   room: { lngLat: LngLat; label: string } | null;
   /** One floor of a building's indoor map, with the destination room highlighted. */
-  floorPlan: { rooms: IndoorRoom[]; target?: string } | null;
+  /** One floor of the destination's plan, with the indoor route's part on that floor. */
+  floorPlan: { rooms: IndoorRoom[]; target?: string; path?: LngLat[][] } | null;
   /** Fly the camera here (bump `key` to repeat). */
   focus: { at: LngLat; zoom: number; key: number } | null;
   /** Taps mark a spot rather than set a route endpoint: show a crosshair. */
@@ -199,6 +200,15 @@ export function MapView(props: MapViewProps) {
         minzoom: 16.5,
         filter: ["==", ["geometry-type"], "Polygon"],
         paint: { "line-color": ["case", ["get", "target"], "#5b21b6", "#94a3b8"], "line-width": ["case", ["get", "target"], 2.5, 1] },
+      });
+      map.addLayer({
+        id: "fp-path",
+        type: "line",
+        source: "floorplan",
+        minzoom: 16.5,
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#5b21b6", "line-width": 3.5, "line-dasharray": [1, 1.6] },
       });
       map.addLayer({
         id: "fp-labels",
@@ -361,7 +371,9 @@ export function MapView(props: MapViewProps) {
           geometry: { type: "Polygon", coordinates: [r.outline!] },
         },
         ...(r.ref ? [{ type: "Feature" as const, properties: { ref: r.ref, target: isTarget(r) }, geometry: { type: "Point" as const, coordinates: r.center } }] : []),
-      ]),
+      ]).concat(
+        (plan?.path ?? []).map((line) => ({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: line } })),
+      ),
     });
   }, [ready, props.floorPlan]);
 

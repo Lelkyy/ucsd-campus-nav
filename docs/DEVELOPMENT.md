@@ -80,6 +80,19 @@ Ask Leonid for the files. Don't commit them or the generated
   with `level`), the map draws that floor and highlights the destination room,
   with a floor switcher. OSM's level 0 is the ground floor, shown as "Floor 1".
   Today that's the CSE building (EBU3B, ~370 spaces) and the Cala residence.
+- **Indoor routes** (`indoorRoute.ts`): A* on a 0.5 m grid over each floor,
+  from the door the outdoor route uses to the room. Walkable: corridors, areas,
+  lobbies, stairwells/elevators (`stairs=yes`, `room=stairs`, `highway=elevator`,
+  `room=elevator` with a multi-floor `level`, which also join floors), and the
+  target room; other rooms are walls. Step-free trips use elevators only. It
+  returns null (and the app shows no inside view or map floor plan) when the room
+  has no outline, its floor has no mapped corridor, the door is more than 6 m from
+  mapped space, or nothing connects them. In CSE, floors 2–4 have rooms but no
+  corridors, so only ground-floor and basement rooms get a route.
+- **Inside view** (`BuildingView.tsx`): draws the floor plan to scale with the
+  route; a dot walks it and the view switches floors at the stairs/elevator
+  ("Take the stairs down to basement"), with Replay. During navigation it opens
+  once when you're within 60 m of the end (or step to the last instruction).
 - **Room pins:** for every other building, students can "Pin this room": tap its
   spot, pick the floor. It's saved on their device right away and emailed to the
   map team as an entry for `data/room-locations.json` (`"CODE ROOM": { at, level }`),
@@ -109,8 +122,8 @@ wrong one sends students to the wrong building. `npm test` fails if a code with
 classes isn't accounted for.
 
 Rooms come from `data/rooms.json` (2025–26, public schedule) plus the private
-Fall 2026 file. Routing goes to the building's door; indoor (floor/room)
-navigation isn't mapped.
+Fall 2026 file. Routing goes to the building's door; inside, only buildings with
+mapped corridors get a route to the room (see Floor plans above).
 
 ## Fixing the map
 

@@ -274,7 +274,9 @@ async function main() {
           ? toLine(el.geometry)
           : el.members.flatMap((m) => (m.geometry ? toLine(m.geometry) : []));
     if (!pts.length) return [];
-    const ring = pts.length > 3 ? pts.slice(0, -1) : pts;
+    const t = el.tags!;
+    const closed = el.type === "way" && pts.length > 3 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1];
+    const ring = closed ? pts.slice(0, -1) : pts;
     const center: LngLat = [ring.reduce((s, p) => s + p[0], 0) / ring.length, ring.reduce((s, p) => s + p[1], 0) / ring.length];
     return [
       {
@@ -282,8 +284,17 @@ async function main() {
         name: el.tags!.ref ? el.tags!.name : undefined,
         level: el.tags!.level,
         center,
-        outline: el.type === "way" && pts.length > 3 ? pts : undefined,
+        outline: closed ? pts : undefined,
+        line: el.type === "way" && !closed && kind === "corridor" && pts.length > 1 ? pts : undefined,
         kind,
+        use:
+          t.stairs === "yes" || t.room === "stairs"
+            ? "stairs"
+            : t.highway === "elevator" || t.room === "elevator"
+              ? "elevator"
+              : t.room === "lobby"
+                ? "lobby"
+                : undefined,
         source: "osm",
       },
     ];
@@ -414,16 +425,20 @@ async function main() {
         kind: n.tags?.entrance ?? "yes",
         wheelchair: wheelchair === "yes" || wheelchair === "no" || wheelchair === "limited" ? wheelchair : undefined,
         label: n.tags?.name ?? n.tags?.ref,
+        level: n.tags?.level,
       };
     });
-    const elevators = elevatorPts.filter((p) => inBuilding(b, p)).length;
-    const levels = Number(b.tags["building:levels"]);
     const rooms = indoorRooms.filter((r) => inBuilding(b, r.center));
+    // Elevators mapped as points, or as shafts on the floor plans.
+    const elevatorsAt = [...elevatorPts.filter((p) => inBuilding(b, p)), ...rooms.filter((r) => r.use === "elevator").map((r) => r.center)];
+    const elevators = elevatorsAt.length;
+    const levels = Number(b.tags["building:levels"]);
     if (rooms.length) {
       indoor[b.id] = rooms.map((r) => ({
         ...r,
         center: [round(r.center[0]), round(r.center[1])] as LngLat,
         outline: r.outline?.map(([x, y]) => [round(x), round(y)] as LngLat),
+        line: r.line?.map(([x, y]) => [round(x), round(y)] as LngLat),
       }));
     }
     buildings.push({
@@ -436,7 +451,8 @@ async function main() {
       access: walkable ? "walk" : "shuttle",
       ...(doors.length ? { entrances: doors } : {}),
       ...(Number.isFinite(levels) && levels > 0 ? { levels } : {}),
-      ...(elevators ? { elevators } : {}),
+      ...(elevators ? { elevators, elevatorsAt: elevatorsAt.map(([x, y]) => [round6(x), round6(y)] as LngLat) } : {}),
+      outline: b.lines.map((ring) => ring.map(([x, y]) => [round6(x), round6(y)] as LngLat)),
     });
   }
   for (const f of custom.features) {
@@ -872,6 +888,11 @@ function pointInRing(p: LngLat, ring: LngLat[]): boolean {
     if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) inside = !inside;
   }
   return inside;
+}
+
+/** ~10 cm precision: plenty for drawing outlines, and keeps the file small. */
+function round6(x: number): number {
+  return Math.round(x * 1e6) / 1e6;
 }
 
 function round(x: number): number {

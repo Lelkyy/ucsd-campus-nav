@@ -754,3 +754,86 @@ button.start { width: 100%; padding: 11px; font-size: 15px; border-radius: 999px
   border: 1px solid color-mix(in srgb, #f59e0b 45%, transparent);
 }
 .pin-room select, .pin-room input { background: var(--surface) !important; }
+
+/* ---------- Inside view (drawn building interior) ---------- */
+.inside-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.inside-head h3 { margin: 0; }
+.inside-view {
+  position: fixed;
+  z-index: 5;
+  inset: 16px 16px 16px 432px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.inside-view-card {
+  pointer-events: auto;
+  width: min(760px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.inside-view-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 14px 16px 6px; }
+.inside-view-head p { margin: 2px 0 0; }
+.inside-view-body { display: grid; grid-template-columns: 44px 1fr; gap: 10px; padding: 6px 16px; min-height: 0; overflow: auto; }
+.floor-tabs { display: flex; flex-direction: column; gap: 4px; }
+.floor-tabs button { position: relative; padding: 7px 0; font-weight: 650; }
+.floor-tabs button.on { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+.floor-tabs .dot { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: #f59e0b; }
+.inside-svg { width: 100%; height: auto; max-height: 62vh; }
+.iv-footprint { fill: var(--surface-2); stroke: var(--text); stroke-width: 2.5; stroke-linejoin: round; }
+.iv-space { fill: var(--surface); stroke: #94a3b8; stroke-width: 1; }
+.iv-space.corridor, .iv-space.area { fill: color-mix(in srgb, var(--surface-2) 70%, #cbd5e1); }
+.iv-space.target { fill: #7c3aed; stroke: #5b21b6; stroke-width: 2; }
+.iv-label { font-size: 9px; fill: var(--muted); text-anchor: middle; dominant-baseline: middle; }
+.iv-label.target { font-size: 12px; font-weight: 700; fill: #fff; }
+.iv-space.stairs, .iv-space.elevator { fill: color-mix(in srgb, #0ea5e9 22%, var(--surface)); stroke: #0284c7; }
+.iv-way { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.iv-way.ahead { stroke: #7c3aed; stroke-width: 3; stroke-dasharray: 2 7; opacity: 0.7; }
+.iv-way.done { stroke: #7c3aed; stroke-width: 5; }
+.iv-change rect { fill: #0284c7; stroke: #fff; stroke-width: 2; }
+.iv-change text { font-size: 13px; font-weight: 700; fill: #fff; text-anchor: middle; }
+.iv-change .iv-change-label { font-size: 11px; fill: #0369a1; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.iv-me circle { fill: #2563eb; stroke: #fff; stroke-width: 2.5; }
+.iv-me .halo { fill: rgb(37 99 235 / 0.2); stroke: none; }
+.iv-me.changing .halo { animation: iv-pulse 0.9s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+@keyframes iv-pulse { 50% { transform: scale(1.6); opacity: 0.4; } }
+.iv-floor { animation: iv-fade 0.35s ease-out; }
+@keyframes iv-fade { from { opacity: 0.2; } }
+.iv-stage { position: relative; min-width: 0; }
+.iv-cue {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 8px; align-items: center; padding: 6px 12px; border-radius: 999px;
+  background: #0369a1; color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+}
+.iv-cue span { font-size: 16px; }
+.floor-tabs .dot.room { background: #7c3aed; }
+.iv-steps { margin: 0 0 10px; padding-left: 20px; display: grid; gap: 3px; }
+.iv-steps li { color: var(--muted); transition: color 0.2s; }
+.iv-steps li.current { color: var(--text); font-weight: 600; }
+.iv-steps li.done { color: var(--text); }
+.iv-foot-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) {
+  .iv-floor, .iv-me.changing .halo { animation: none; }
+}
+.iv-door { fill: #fff; stroke: #475569; stroke-width: 2; }
+.iv-door.main { stroke: var(--text); stroke-width: 3; }
+.iv-door.accessible { stroke: #2563eb; stroke-width: 3; }
+.iv-door.emergency { stroke: #dc2626; stroke-dasharray: 2 2; }
+.iv-door.used { fill: #16a34a; stroke: #fff; stroke-width: 2.5; }
+.iv-door-label { font-size: 11px; font-weight: 700; fill: #16a34a; text-anchor: middle; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.iv-north path { fill: var(--text); }
+.iv-north text, .iv-scale text { font-size: 10px; fill: var(--muted); text-anchor: middle; }
+.iv-scale text { text-anchor: start; }
+.iv-scale line { stroke: var(--text); stroke-width: 2; }
+.inside-view-foot { padding: 8px 16px 14px; border-top: 1px solid var(--border); font-size: 13px; }
+.inside-view-foot p { margin: 0 0 8px; }
+
+@media (max-width: 760px) {
+  .inside-view { inset: 0; padding: 8px; background: rgb(0 0 0 / 0.35); pointer-events: auto; }
+  .inside-view-body { grid-template-columns: 38px 1fr; }
+}

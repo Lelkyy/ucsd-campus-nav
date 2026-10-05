@@ -29,8 +29,11 @@ the way, using the paths, stairs and bike paths students actually use.
   GPS ("In 120 ft, turn left onto Library Walk"), re-routes when you go off
   course, can speak instructions, and keeps the screen on.
 - **Inside the building:** which door to use, which floor, elevators, and the
-  exact room: drawn on the floor plan where the building is mapped indoors (the
-  CSE building today), or pinned by students everywhere else ("Pin this room").
+  exact room, pinned by students where the building isn't mapped indoors ("Pin this
+  room"). Where the corridors are mapped (CSE's ground floor and basement today),
+  an inside view walks you from the door to the room, animating the stairs or
+  elevator between floors, and opens by itself as you reach the building. Floors
+  without mapped corridors get no drawing rather than a guessed one.
 - **Student place names:** search "Revelle bus stop", "GTC" and other names
   students use. Name any spot yourself, and suggest names for everyone.
 - **Report a problem:** tap the spot on the map, pick what's wrong, and send it

@@ -51,6 +51,8 @@ export interface Entrance {
   /** wheelchair=* when tagged. */
   wheelchair?: "yes" | "no" | "limited";
   label?: string;
+  /** OSM level=* of the floor the door opens onto, when tagged. */
+  level?: string;
 }
 
 /** An indoor space: a room or corridor mapped in OpenStreetMap, or a room students pinned. */
@@ -63,7 +65,12 @@ export interface IndoorRoom {
   center: LngLat;
   /** Floor-plan outline, when mapped as an area. */
   outline?: LngLat[];
+  /** A corridor mapped as a line (its centre) rather than an area. */
+  line?: LngLat[];
   kind: "room" | "corridor" | "area";
+  /** What the space is for, when that matters for getting around: stairwells and
+   *  elevators join floors, lobbies are walkable. */
+  use?: "stairs" | "elevator" | "lobby";
   /** "osm": mapped in OpenStreetMap; "pinned": a student marked where it is (data/room-locations.json). */
   source: "osm" | "pinned";
 }
@@ -108,4 +115,8 @@ export interface Building {
   levels?: number;
   /** Elevators mapped inside the building. */
   elevators?: number;
+  /** Where those elevators are. */
+  elevatorsAt?: LngLat[];
+  /** Footprint outline rings (outer walls), for the inside view. */
+  outline?: LngLat[][];
 }

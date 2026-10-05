@@ -10,6 +10,7 @@ import {
   transitOptions,
   tripFare,
   type TransitPreference,
+  indoorRoute,
   insideHints,
   endpointLabel,
   endpointPosition,
@@ -24,6 +25,7 @@ import {
 } from "@campus/core";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { BuildingSearch } from "./BuildingSearch.tsx";
+import { BuildingView } from "./BuildingView.tsx";
 import { loadCampus, storage, type CampusData } from "./data.ts";
 import { Itinerary, formatDistance, formatTime } from "./Itinerary.tsx";
 import { KIND_COLORS, MapView, type RouteLine } from "./MapView.tsx";
@@ -73,6 +75,8 @@ export function App() {
   /** Floor shown on the destination's floor plan (null = the room's floor), and camera moves. */
   const [planLevel, setPlanLevel] = useState<number | null>(null);
   const [focus, setFocus] = useState<{ at: LngLat; zoom: number; key: number } | null>(null);
+  /** The drawn inside view of the destination building is open. */
+  const [insideOpen, setInsideOpen] = useState(false);
   /** Indoor maps plus rooms pinned on this device (pins win over guesses). */
   const indoor = useMemo<IndoorData>(() => {
     if (!data) return {};
@@ -271,9 +275,25 @@ export function App() {
     [data, destBuilding, to, route, indoor],
   );
 
-  // The destination's floor plan, on the room's floor unless another floor is picked.
+  // The way from the door to the room, when the building's corridors are mapped well
+  // enough to find one. Without it, no inside drawings are shown at all.
   const destRoom = to?.kind === "building" ? to.room : undefined;
   const planRooms = destBuilding ? indoor[destBuilding.id] : undefined;
+  const indoorWay = useMemo(() => {
+    const end = route?.coordinates[route.coordinates.length - 1];
+    if (!destRoom || !inside || !end) return null;
+    const door = inside.entrance;
+    return indoorRoute(planRooms, destRoom, {
+      from: door?.lngLat ?? end,
+      fromLevel: levelsOf(door?.level)[0],
+      stepFree: mode === "accessible" || (mode === "bus" && transitStepFree),
+    });
+  }, [planRooms, destRoom, inside, route, mode, transitStepFree]);
+  useEffect(() => {
+    if (!indoorWay) setInsideOpen(false);
+  }, [indoorWay]);
+
+  // The destination's floor plan, on the room's floor unless another floor is picked.
   const planLevels = useMemo(
     () => [...new Set((planRooms ?? []).filter((r) => r.source === "osm" && r.outline).flatMap((r) => levelsOf(r.level)))].sort((a, b) => a - b),
     [planRooms],
@@ -281,8 +301,12 @@ export function App() {
   const roomLevel = inside?.mappedRoom ? levelsOf(inside.mappedRoom.level)[0] : undefined;
   const shownLevel = planLevel ?? roomLevel ?? (planLevels.includes(0) ? 0 : planLevels[0]);
   const floorPlanData =
-    planLevels.length && shownLevel !== undefined
-      ? { rooms: floorPlan(planRooms, shownLevel), target: shownLevel === roomLevel ? destRoom : undefined }
+    indoorWay && planLevels.length && shownLevel !== undefined
+      ? {
+          rooms: floorPlan(planRooms, shownLevel),
+          target: shownLevel === roomLevel ? destRoom : undefined,
+          path: indoorWay.legs.filter((l) => l.level === shownLevel).map((l) => l.points),
+        }
       : null;
   useEffect(() => setPlanLevel(null), [destBuilding?.id, destRoom]);
   const roomKey = (building: { id: string; aliases: string[] }, room: string) =>
@@ -308,9 +332,11 @@ export function App() {
               }
             : undefined
         }
+        onOpenInside={indoorWay ? () => setInsideOpen(true) : undefined}
         onPinRoom={
           destRoom
             ? () => {
+                setInsideOpen(false);
                 setPinning({ key: roomKey(destBuilding, destRoom) });
                 setPinAt(null);
                 setFocus({ at: destBuilding.center, zoom: 18.6, key: Date.now() });
@@ -457,6 +483,18 @@ export function App() {
         )}
       </div>
 
+      {insideOpen && destBuilding && destRoom && inside && indoorWay && (
+        <BuildingView
+          key={`${destBuilding.id}-${destRoom}`}
+          building={destBuilding}
+          room={destRoom}
+          indoorRooms={planRooms}
+          hints={inside}
+          way={indoorWay}
+          onClose={() => setInsideOpen(false)}
+        />
+      )}
+
       <aside className={`sheet ${sheetOpen ? "open" : ""}`} aria-label="Directions and schedule">
         <button className="sheet-handle" aria-label={sheetOpen ? "Collapse panel" : "Expand panel"} onClick={() => setSheetOpen((v) => !v)}>
           <span />
@@ -486,6 +524,7 @@ export function App() {
               steps={steps}
               destination={endpointLabel(to)}
               arrival={insideCard}
+              onNear={indoorWay ? () => setInsideOpen(true) : undefined}
               onPosition={setUserPos}
               onReroute={(p) => {
                 setFromRaw({ kind: "point", lngLat: p, label: "My location" });
