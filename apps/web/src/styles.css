@@ -9,6 +9,8 @@
   --clay: #c7a491;
   --blush: #eecfca;
   --rose: #b4655b;
+  /* From the Triton Trails logo. */
+  --brand: #17301b;
 
   --bg: #f3eee8;
   --surface: #fdfbf8;
@@ -41,6 +43,7 @@
     --muted: #a7ab9b;
     --border: #353a2b;
     --accent: var(--sage-light);
+    --brand: #dfe8c9;
     --accent-text: #1f2219;
     --accent-soft: #303628;
     --focus: var(--sage-light);
@@ -60,6 +63,7 @@
   --muted: #a7ab9b;
   --border: #353a2b;
   --accent: var(--sage-light);
+  --brand: #dfe8c9;
   --accent-text: #1f2219;
   --accent-soft: #303628;
   --focus: var(--sage-light);
@@ -82,7 +86,9 @@ body {
   font-variant-numeric: tabular-nums;
 }
 h1 { font-family: var(--font-display); font-size: 21px; font-weight: 550; letter-spacing: -0.01em; margin: 0; }
-h1 em { font-style: italic; font-weight: 400; color: var(--sage); }
+/* The logo's wordmark: a heavy geometric sans in the logo's forest green. */
+h1.brand { display: flex; align-items: center; gap: 8px; font-family: var(--font); font-size: 19px; font-weight: 700; letter-spacing: -0.02em; color: var(--brand); }
+.brand-mark { display: block; width: 26px; height: auto; }
 h2 { font-family: var(--font-display); font-size: 17px; font-weight: 550; margin: 0; }
 h3 { font-size: 12px; font-weight: 600; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 code { font-size: 12px; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }

@@ -1,4 +1,8 @@
-# UCSD Campus Nav
+# Triton Trails
+
+<img src="apps/web/public/logo.png" alt="Triton Trails" width="260" />
+
+UCSD campus navigation
 
 We've all gotten lost on campus at some point. Google Maps doesn't show the
 campus footpaths, and there's no good way to plan a route if you commute by

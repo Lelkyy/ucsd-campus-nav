@@ -48,7 +48,7 @@ export function ReportPanel({ buildings, pin, onClearPin, route, dataDate }: Pro
   }, [pin, buildings]);
 
   const ready = category && (details.trim() || pin);
-  const subject = `Campus Nav report: ${category ?? ""}`;
+  const subject = `Triton Trails report: ${category ?? ""}`;
   const body = [
     `Problem: ${category ?? "(not chosen)"}`,
     pin
@@ -60,7 +60,7 @@ export function ReportPanel({ buildings, pin, onClearPin, route, dataDate }: Pro
     "Details:",
     details.trim() || "(none)",
     "",
-    `— Sent from Campus Nav (map data ${dataDate})`,
+    `— Sent from Triton Trails (map data ${dataDate})`,
   ]
     .filter((line, i, all) => line !== "" || all[i - 1] !== "")
     .join("\n");

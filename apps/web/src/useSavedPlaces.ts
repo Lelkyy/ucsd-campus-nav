@@ -38,9 +38,9 @@ export function suggestPlaceHref(name: string, at: LngLat, note?: string): strin
     `Map: https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=19/${lat}/${lon}`,
     note ? `Note: ${note}` : "",
     "",
-    "Suggested from Campus Nav. Maintainers: add to data/places.json.",
+    "Suggested from Triton Trails. Maintainers: add to data/places.json.",
   ]
     .filter((l, i, all) => l !== "" || all[i - 1] !== "")
     .join("\n");
-  return `mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(`Campus Nav place name: ${name}`)}&body=${encodeURIComponent(body)}`;
+  return `mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(`Triton Trails place name: ${name}`)}&body=${encodeURIComponent(body)}`;
 }

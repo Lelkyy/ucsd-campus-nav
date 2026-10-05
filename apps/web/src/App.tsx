@@ -492,8 +492,9 @@ export function App() {
           <ChevronIcon up={!sheetOpen} />
         </button>
         <header className="sheet-head">
-          <h1>
-            Campus <em>Nav</em>
+          <h1 className="brand">
+            <img src="/logo-mark.png" alt="" className="brand-mark" width="26" height="32" />
+            Triton Trails
           </h1>
           <nav className="tabs" aria-label="Sections" hidden={navigating}>
             <button className={tab === "go" ? "on" : ""} aria-current={tab === "go"} onClick={() => setTab("go")}>
