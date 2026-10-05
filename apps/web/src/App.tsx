@@ -521,7 +521,7 @@ export function App() {
                   <BuildingSearch
                     label="To"
                     hideLabel
-                    placeholder="Destination: building, room or place"
+                    placeholder="Destination: WLH 2001, CSE 11, Geisel…"
                     search={campusSearch!}
                     buildingById={data.buildingById}
                     placeById={placeById}

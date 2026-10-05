@@ -19,7 +19,8 @@ export function floorFromRoom(room: string): FloorGuess | null {
   const r = room.trim().toUpperCase();
   if (/^B[-\s]?\d+/.test(r)) return { floor: "B", label: "Basement", source: "number" };
   const digits = r.replace(/^[A-Z](?=\d)/, ""); // "E209" (wing letter) -> "209"
-  const m = digits.match(/^(\d)\d{2,3}[A-Z]?$/);
+  // "2001", "209A", and a wing letter after the floor: "1E106" (Otterson), "2A03" (BRF2).
+  const m = digits.match(/^(\d)\d{2,3}[A-Z]?$/) ?? digits.match(/^(\d)[A-Z]\d{2,3}$/);
   if (!m) return null;
   const floor = m[1];
   return { floor, label: floor === "0" ? "Ground level" : floor === "1" ? "Floor 1 (ground)" : `Floor ${floor}`, source: "number" };

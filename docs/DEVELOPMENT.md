@@ -132,8 +132,14 @@ pointer (see Room pointers above).
 
 - buildings by name, code ("WLH", "CSE", "HDSI") and nickname or old name, with
   partial words ("warren lec") and typos ("giesel") forgiven;
-- rooms in any form: "WLH 2001", "wlh2001", "2001 WLH", "warren lecture hall
-  2001", and "WLH 20" lists the rooms classes meet in that start with 20;
+- rooms in any form, checked against the rooms classes actually meet in:
+  "WLH 2001", "wlh2001", "2001 WLH", "WLH rm 2001", "WLH #2001", "WLH-2001",
+  "warren lecture hall 2001". Rooms compare loosely ("MANDE B104" = B-104,
+  "RWAC 103" = 0103, "otrsn 1e106"), named rooms match by their start
+  ("mandeville auditorium" -> MANDE AUD), a number alone ("2001") lists every
+  building with that room, "WLH 20" lists the rooms starting with 20, and a full
+  number nobody's class uses is still offered (marked "not a listed classroom").
+  Numbers are never typo-matched;
 - courses ("CSE 11", "math20c", or a title like "data structures") at their
   lecture's room, and your own classes first;
 - student place names, your saved places, then shuttle stops.

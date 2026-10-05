@@ -28,6 +28,8 @@ const label = (h: SearchHit) =>
           ? `course ${h.course.code}`
           : `class ${h.meeting.course}`;
 const first = (q: string) => label(search.search(q)[0]);
+/** The schedule code, which the build puts first among a building's aliases. */
+const codeOf = (b: Building) => b.aliases.find((a) => /^[A-Z][A-Z0-9-]{1,5}$/.test(a));
 
 describe("CampusSearch", () => {
   it("finds rooms however they're typed", () => {
@@ -37,6 +39,54 @@ describe("CampusSearch", () => {
     expect(first("CENTR 115")).toBe("room Center Hall 115");
     expect(first("centr115")).toBe("room Center Hall 115");
     expect(search.search("CENTR 115")[0]).toMatchObject({ scheduled: true });
+  });
+
+  it("recognises every room format in the schedule", () => {
+    const room = (q: string) => {
+      const h = search.search(q).find((x) => x.kind === "room");
+      return h?.kind === "room" ? `${codeOf(h.building)} ${h.room}${h.scheduled ? "" : " (unlisted)"}` : "none";
+    };
+    // Letters inside the number, hyphens, leading zeros, short and named rooms.
+    expect(room("OTRSN 1E106")).toBe("OTRSN 1E106");
+    expect(room("otrsn 1e106")).toBe("OTRSN 1E106");
+    expect(room("BRF2 2A03")).toBe("BRF2 2A03");
+    expect(room("MANDE B-104")).toBe("MANDE B-104");
+    expect(room("MANDE B104")).toBe("MANDE B-104");
+    expect(room("mande b 104")).toBe("MANDE B-104");
+    expect(room("APM B402A")).toBe("APM B402A");
+    expect(room("apmb402a")).toBe("APM B402A");
+    expect(room("COA B17")).toBe("COA B17");
+    expect(room("GH 15")).toBe("GH 15");
+    expect(room("LEDDN AUD")).toBe("LEDDN AUD");
+    expect(room("mandeville auditorium")).toBe("MANDE AUD");
+    // Leading zeros either way.
+    const rwac = buildings.find((b) => b.aliases.includes("RWAC"))!;
+    const zeroRoom = rwac.rooms!.find((r) => r.startsWith("0"))!;
+    expect(room(`RWAC ${zeroRoom.replace(/^0+/, "")}`)).toBe(`RWAC ${zeroRoom}`);
+  });
+
+  it("reads the words people put around room numbers", () => {
+    for (const q of ["WLH room 2001", "WLH rm 2001", "WLH rm. 2001", "WLH #2001", "WLH-2001", "WLH, 2001", "room 2001 warren lecture hall"]) {
+      expect(first(q), q).toBe("room Warren Lecture Hall 2001");
+    }
+  });
+
+  it("finds a room number on its own in every building that has it", () => {
+    const hits = search.search("2001").filter((h) => h.kind === "room");
+    expect(hits.some((h) => h.kind === "room" && codeOf(h.building) === "WLH")).toBe(true);
+    expect(hits.every((h) => h.kind === "room" && h.room === "2001" && h.scheduled)).toBe(true);
+    // Numbers aren't fuzzy: "2001" doesn't bring up a building called "200".
+    expect(search.search("2001").some((h) => h.kind === "building" && h.building.name === "200")).toBe(false);
+  });
+
+  it("still offers an unlisted room number in a known building", () => {
+    expect(search.search("CENTR 999")[0]).toMatchObject({ kind: "room", room: "999", scheduled: false });
+  });
+
+  it("doesn't read building names as rooms", () => {
+    expect(search.search("warren lecture hall").some((h) => h.kind === "room")).toBe(false);
+    expect(search.search("price center west").some((h) => h.kind === "room")).toBe(false);
+    expect(first("EBU3B")).toBe("building Computer Science & Engineering");
   });
 
   it("lists rooms while you type the number", () => {

@@ -13,6 +13,8 @@ describe("floorFromRoom", () => {
     ["B210", "B"],
     ["E209", "2"],
     ["0132", "0"],
+    ["1E106", "1"],
+    ["2A03", "2"],
   ])("%s is on floor %s", (room, floor) => {
     expect(floorFromRoom(room)?.floor).toBe(floor);
   });
