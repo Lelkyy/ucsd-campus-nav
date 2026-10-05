@@ -7,7 +7,7 @@ import { formatCourseCode, searchCourses, sectionChoices, type CourseSections, t
 import { TransitNetwork, type TransitData } from "./transit.ts";
 import { checkBusRoute } from "./plan.ts";
 import { transitOptions } from "./transitOptions.ts";
-import { EdgeKind, type Building, type GraphData } from "./types.ts";
+import { EdgeKind, type Building, type GraphData, type IndoorData, type LngLat } from "./types.ts";
 
 // Small synthetic graph, ~111 m per 0.001° of latitude:
 //
@@ -313,6 +313,23 @@ describe("real campus data", () => {
     expect(failures.map((b) => b.name)).toEqual([]);
   });
 
+  it("keeps each floor plan to its own building", () => {
+    const indoor = read<IndoorData>("indoor.json");
+    const owners = new Map<string, string[]>();
+    for (const [id, rooms] of Object.entries(indoor)) {
+      const b = buildings.find((x) => x.id === id)!;
+      expect(b, `indoor data for unknown building ${id}`).toBeDefined();
+      for (const r of rooms.filter((r) => r.source === "osm")) {
+        // Inside that building's walls...
+        expect(b.outline!.some((ring) => inRing(r.center, ring)), `${r.ref ?? r.kind} outside ${b.name}`).toBe(true);
+        // ...and listed under no other building.
+        const key = `${r.center.join()}|${r.level}|${r.ref ?? r.kind}`;
+        owners.set(key, [...new Set([...(owners.get(key) ?? []), id])]);
+      }
+    }
+    expect([...owners.values()].filter((ids) => ids.length > 1)).toEqual([]);
+  });
+
   it("reaches every campus building by bike", () => {
     const failures = buildings.filter((b) => !findRoute(graph, start, b.targets, { profile: PROFILES.bike }));
     expect(failures.map((b) => b.name)).toEqual([]);
@@ -376,3 +393,13 @@ describe("nextClass", () => {
     expect(next.meeting.id).toBe("a");
   });
 });
+
+function inRing([x, y]: LngLat, ring: LngLat[]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}

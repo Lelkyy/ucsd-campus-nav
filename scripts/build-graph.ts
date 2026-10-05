@@ -478,6 +478,15 @@ async function main() {
   const unreachable: string[] = [];
   const onMain = (i: number) => kept(i) && comps.id[remap[i]] === mainComponent;
   const onServed = (i: number) => kept(i) && servedComps.has(comps.id[remap[i]]);
+  // Each indoor space belongs to one building: the smallest one it's inside, so
+  // overlapping outlines (an OSM building and a UCSD footprint) can't share a floor plan.
+  const indoorOwner = new Map<IndoorRoom, RawBuilding>();
+  for (const r of indoorRooms) {
+    const owners = campusBuildings.filter((b) => inBuilding(b, r.center));
+    const size = (b: RawBuilding) => b.lines.reduce((sum, ring) => sum + ringArea(ring), 0);
+    const owner = owners.sort((a, b) => size(a) - size(b))[0];
+    if (owner) indoorOwner.set(r, owner);
+  }
   for (const b of campusBuildings) {
     // Prefer doors on the main network; else a piece a shuttle serves.
     let { targets, entranceCount } = targetsOf(b, onMain);
@@ -508,7 +517,7 @@ async function main() {
         level: n.tags?.level,
       };
     });
-    const rooms = indoorRooms.filter((r) => inBuilding(b, r.center));
+    const rooms = indoorRooms.filter((r) => indoorOwner.get(r) === b);
     // Elevators mapped as points, or as shafts on the floor plans.
     const elevatorsAt = [...elevatorPts.filter((p) => inBuilding(b, p)), ...rooms.filter((r) => r.use === "elevator").map((r) => r.center)];
     const elevators = elevatorsAt.length;
