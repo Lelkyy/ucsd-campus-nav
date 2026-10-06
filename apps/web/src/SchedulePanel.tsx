@@ -36,9 +36,6 @@ interface Props {
 
 const SCHOOL_DAYS: Weekday[] = ["M", "Tu", "W", "Th", "F"];
 
-
-type Adding = null | "course" | "custom";
-
 /** Color for a course, stable for a given schedule. */
 export function courseColor(meetings: ClassMeeting[], course: string): string {
   const courses = [...new Set(meetings.map((m) => m.course))].sort();
@@ -104,13 +101,25 @@ const NO_PLACES = new Map<string, never>();
 
 export function SchedulePanel({ data, schedule, view, onView, estimateBetween, onDirections, onDayOverlay }: Props) {
   const { meetings } = schedule;
-  const [adding, setAdding] = useState<Adding>(null);
+  // null: browsing; "" : adding a new course; a code: changing that course's section.
+  const [adding, setAdding] = useState<string | null>(null);
+  const [addingCustom, setAddingCustom] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // The last course removed, to put back.
+  const [removed, setRemoved] = useState<ClassMeeting[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const courses = useMemo(() => [...new Set(meetings.map((m) => m.course))].sort(), [meetings]);
   const colorOf = (course: string) => courseColor(meetings, course);
+  const titleOf = (code: string) => data.sections?.courses.find((c) => c.code === code)?.title;
+  const busy = adding !== null || addingCustom;
+
+  const removeCourse = (course: string) => {
+    setRemoved(meetings.filter((m) => m.course === course));
+    setMessage(null);
+    schedule.removeCourse(course);
+  };
 
   return (
     <section className="panel">
@@ -119,127 +128,183 @@ export function SchedulePanel({ data, schedule, view, onView, estimateBetween, o
           My schedule
           {data.sections && <span className="muted small"> · {data.sections.term}</span>}
         </h2>
-        <div className="segmented small-seg" role="radiogroup" aria-label="Schedule view">
-          {(["day", "week", "list"] as const).map((v) => (
-            <button key={v} role="radio" aria-checked={view === v} className={view === v ? "on" : ""} onClick={() => onView(v)}>
-              {v === "day" ? "Day" : v === "week" ? "Week" : "Courses"}
-            </button>
-          ))}
-        </div>
+        {!busy && meetings.length > 0 && (
+          <button className="primary small-btn" onClick={() => (data.sections ? setAdding("") : setAddingCustom(true))}>
+            + Add course
+          </button>
+        )}
       </div>
 
-      {meetings.length === 0 && !adding && (
-        <p className="muted small">
-          {data.sections
-            ? "Add your courses: pick a section and its lectures, discussions and exams are filled in for you."
-            : "Add your classes with their building, room and times."}
-        </p>
-      )}
-
-      {view === "day" && meetings.length > 0 ? (
-        <DayView
-          data={data}
-          meetings={meetings}
-          colorOf={colorOf}
-          estimateBetween={estimateBetween}
-          onDirections={onDirections}
-          onOverlay={onDayOverlay}
-        />
-      ) : view === "week" ? (
-        <WeekView meetings={meetings} colorOf={colorOf} onPick={(m) => onDirections(m)} />
-      ) : (
-        <ul className="course-list">
-          {courses.map((course) => (
-            <li key={course} className="course" style={{ ["--course" as string]: colorOf(course) }}>
-              <div className="course-head">
-                <strong>{course}</strong>
-                <button className="link danger" onClick={() => schedule.removeCourse(course)}>
-                  Remove
-                </button>
-              </div>
-              <ul className="meeting-list">
-                {sortMeetings(meetings.filter((m) => m.course === course)).map((m) =>
-                  editingId === m.id ? (
-                    <li key={m.id}>
-                      <MeetingForm
-                        data={data}
-                        initial={m}
-                        submitLabel="Save"
-                        onCancel={() => setEditingId(null)}
-                        onSubmit={(patch) => {
-                          schedule.update(m.id, patch);
-                          setEditingId(null);
-                        }}
-                      />
-                    </li>
-                  ) : (
-                    <li key={m.id} className="meeting">
-                      <span className="type-badge">{m.type ?? "—"}</span>
-                      <span className="meeting-main">
-                        <span>{whenLabel(m)}</span>
-                        <span className={m.buildingId ? "muted" : "warn"}>{placeLabel(m, data)}</span>
-                      </span>
-                      <span className="row-actions">
-                        <button className="link" disabled={!m.buildingId} onClick={() => onDirections(m)}>
-                          Go
-                        </button>
-                        <button className="link" onClick={() => setEditingId(m.id)}>
-                          Edit
-                        </button>
-                        <button
-                          className="icon-btn"
-                          aria-label={`Delete ${m.course} ${m.type ?? ""}`}
-                          onClick={() => schedule.remove(m.id)}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    </li>
-                  ),
-                )}
-              </ul>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {adding === "course" && data.sections && (
+      {adding !== null && data.sections ? (
         <CourseAdder
           data={data}
           existing={meetings}
+          initialCourse={adding ? data.sections.courses.find((c) => c.code === adding) : undefined}
           onCancel={() => setAdding(null)}
           onAdd={(course, ms) => {
             schedule.removeCourse(course.code);
             schedule.add(ms);
             setAdding(null);
-            setMessage(`Added ${course.code} (${ms.length} meetings).`);
+            setRemoved(null);
+            setMessage(`${course.code} is in your schedule.`);
           }}
         />
-      )}
-      {adding === "custom" && (
+      ) : addingCustom ? (
         <MeetingForm
           data={data}
           submitLabel="Add"
-          onCancel={() => setAdding(null)}
+          onCancel={() => setAddingCustom(false)}
           onSubmit={(m) => {
             schedule.add([{ id: crypto.randomUUID(), ...m }]);
-            setAdding(null);
+            setAddingCustom(false);
           }}
         />
+      ) : meetings.length === 0 ? (
+        <div className="schedule-empty">
+          <p>
+            {data.sections
+              ? "Add your courses and pick your sections. Lectures, discussions and exams fill in, with directions to each."
+              : "Add your classes with their building, room and times."}
+          </p>
+          <button className="primary" onClick={() => (data.sections ? setAdding("") : setAddingCustom(true))}>
+            {data.sections ? "+ Add your first course" : "+ Add a class"}
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="segmented schedule-views" role="radiogroup" aria-label="Schedule view">
+            {(["day", "week", "list"] as const).map((v) => (
+              <button key={v} role="radio" aria-checked={view === v} className={view === v ? "on" : ""} onClick={() => onView(v)}>
+                {v === "day" ? "Day" : v === "week" ? "Week" : "Courses"}
+              </button>
+            ))}
+          </div>
+          {view === "day" ? (
+            <DayView
+              data={data}
+              meetings={meetings}
+              colorOf={colorOf}
+              estimateBetween={estimateBetween}
+              onDirections={onDirections}
+              onOverlay={onDayOverlay}
+            />
+          ) : view === "week" ? (
+            <WeekView meetings={meetings} colorOf={colorOf} onPick={(m) => onDirections(m)} />
+          ) : (
+            <ul className="course-list">
+              {courses.map((course) => {
+                const own = sortMeetings(meetings.filter((m) => m.course === course));
+                // Courses from the catalog are changed by section; hand-made events meeting by meeting.
+                const fromCatalog = !!data.sections && own.some((m) => m.section);
+                const section = sectionGroup(own);
+                return (
+                  <li key={course} className="course" style={{ ["--course" as string]: colorOf(course) }}>
+                    <div className="course-head">
+                      <span className="course-name">
+                        <strong>{course}</strong>
+                        {section && <span className="muted small"> · Section {section}</span>}
+                      </span>
+                      <span className="row-actions">
+                        {fromCatalog && (
+                          <button className="link" onClick={() => setAdding(course)}>
+                            Change section
+                          </button>
+                        )}
+                        <button className="link danger" onClick={() => removeCourse(course)}>
+                          Remove
+                        </button>
+                      </span>
+                    </div>
+                    {titleOf(course) && <div className="muted small">{titleOf(course)}</div>}
+                    <ul className="meeting-list">
+                      {own.map((m) =>
+                        editingId === m.id ? (
+                          <li key={m.id}>
+                            <MeetingForm
+                              data={data}
+                              initial={m}
+                              submitLabel="Save"
+                              onCancel={() => setEditingId(null)}
+                              onSubmit={(patch) => {
+                                schedule.update(m.id, patch);
+                                setEditingId(null);
+                              }}
+                            />
+                          </li>
+                        ) : (
+                          <li key={m.id} className="meeting-row">
+                            <button
+                              className="meeting"
+                              disabled={!m.buildingId}
+                              title={m.buildingId ? "Directions" : undefined}
+                              onClick={() => onDirections(m)}
+                            >
+                              <span className="meeting-type">{typeLabel(m.type) || "Class"}</span>
+                              <span className="meeting-main">
+                                <span>{whenLabel(m)}</span>
+                                <span className={m.buildingId ? "muted" : "warn"}>{placeLabel(m, data)}</span>
+                              </span>
+                              {m.buildingId && (
+                                <span className="meeting-go" aria-hidden="true">
+                                  ›
+                                </span>
+                              )}
+                            </button>
+                            {!fromCatalog && (
+                              <button className="link" onClick={() => setEditingId(m.id)}>
+                                Edit
+                              </button>
+                            )}
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
       )}
 
-      {!adding && (
-        <div className="form-row wrap">
-          {data.sections && (
-            <button className="primary" onClick={() => setAdding("course")}>
-              + Add course
-            </button>
-          )}
-          <button onClick={() => setAdding("custom")}>{data.sections ? "+ Custom event" : "+ Add class"}</button>
-          <button onClick={schedule.exportFile} disabled={meetings.length === 0}>
-            Export
+      {removed && !busy && (
+        <p className="undo-note small">
+          Removed {removed[0]?.course}.{" "}
+          <button
+            className="link"
+            onClick={() => {
+              schedule.add(removed);
+              setRemoved(null);
+            }}
+          >
+            Undo
           </button>
-          <button onClick={() => fileInput.current?.click()}>Import</button>
+        </p>
+      )}
+      {message && !busy && !removed && <p className="muted small">{message}</p>}
+
+      {!busy && (
+        <p className="schedule-footer muted small">
+          {data.sections && (
+            <>
+              <button className="link" onClick={() => setAddingCustom(true)}>
+                Add a custom event
+              </button>
+              {" · "}
+            </>
+          )}
+          {meetings.length > 0 && (
+            <>
+              <button className="link" onClick={schedule.exportFile}>
+                Export
+              </button>
+              {" · "}
+            </>
+          )}
+          <button className="link" onClick={() => fileInput.current?.click()}>
+            Import
+          </button>
+          {meetings.length > 0 && <> · Saved in this browser</>}
           <input
             ref={fileInput}
             type="file"
@@ -256,127 +321,249 @@ export function SchedulePanel({ data, schedule, view, onView, estimateBetween, o
               }
             }}
           />
-        </div>
+        </p>
       )}
-      {message && <p className="muted small">{message}</p>}
-      {meetings.length > 0 && <p className="muted small">Saved in this browser automatically.</p>}
     </section>
   );
 }
 
-/** Search the term's courses, pick a section, preview it, add it. */
+/**
+ * Search the term's courses, then pick a lecture and, if it has them, one of
+ * its discussions or labs: two short lists instead of every combination.
+ */
 function CourseAdder({
   data,
   existing,
+  initialCourse,
   onAdd,
   onCancel,
 }: {
   data: CampusData;
   existing: ClassMeeting[];
+  /** Changing the section of a course already in the schedule. */
+  initialCourse?: CourseSections;
   onAdd: (course: CourseSections, meetings: ClassMeeting[]) => void;
   onCancel: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [course, setCourse] = useState<CourseSections | null>(null);
+  const [course, setCourse] = useState<CourseSections | null>(initialCourse ?? null);
+  const [groupId, setGroupId] = useState<string | null>(null);
   const [choiceId, setChoiceId] = useState<string | null>(null);
   const results = useMemo(() => (course ? [] : searchCourses(data.sections!.courses, query)), [data.sections, query, course]);
-  const choices = useMemo(() => (course ? sectionChoices(course) : []), [course]);
-  const choice = choices.find((c) => c.id === choiceId) ?? (choices.length === 1 ? choices[0] : null);
-  const replacing = course && existing.some((m) => m.course === course.code);
+  const groups = useMemo(() => (course ? lectureGroups(sectionChoices(course)) : []), [course]);
+  const group = groups.find((g) => g.id === groupId) ?? (groups.length === 1 ? groups[0] : null);
+  const choice = group ? (group.choices.find((c) => c.id === choiceId) ?? (group.choices.length === 1 ? group.choices[0] : null)) : null;
+  const others = existing.filter((m) => m.course !== course?.code);
+  const current = course ? existing.filter((m) => m.course === course.code) : [];
 
   const buildingIdForCode = (code: string) => data.buildingByCode.get(code)?.id;
-  const clashes = choice
-    ? findClashes(
-        choice,
-        existing.filter((m) => m.course !== course?.code),
-      )
-    : [];
+  const pickCourse = (c: CourseSections | null) => {
+    setCourse(c);
+    setGroupId(null);
+    setChoiceId(null);
+  };
+  // The type is left out when the heading already says it ("Lecture 001").
+  const lines = (ms: SectionMeeting[], heading?: string) =>
+    ms.map((m, i) => (
+      <span key={i} className="muted small block">
+        {heading?.startsWith(typeLabel(m.type)) ? "" : `${typeLabel(m.type)} · `}
+        {sectionWhen(m)} · {sectionPlace(m, data)}
+      </span>
+    ));
+  const clashNote = (ms: SectionMeeting[]) => {
+    const clashes = findClashes(ms, others);
+    return clashes.length > 0 && <span className="warn small block">Overlaps {clashes.join(", ")}</span>;
+  };
 
+  if (!course) {
+    return (
+      <div className="adder">
+        <label>
+          Find a course
+          <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="CSE 12, MATH 20C, or a title" />
+        </label>
+        {results.length > 0 && (
+          <ul className="pick-list">
+            {results.map((c) => (
+              <li key={c.code}>
+                <button className="pick" onClick={() => pickCourse(c)}>
+                  <strong>{c.code}</strong> <span className="muted">{c.title}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {query && results.length === 0 && <p className="muted small">No course with scheduled meetings matches.</p>}
+        <div className="form-row">
+          <button onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  const exams = choice?.meetings.filter((m) => m.kind !== "class") ?? [];
   return (
     <div className="adder">
-      {!course ? (
-        <>
-          <label>
-            Course
-            <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="CSE 12, MATH 20C, or a title" />
-          </label>
-          {results.length > 0 && (
-            <ul className="pick-list">
-              {results.map((c) => (
-                <li key={c.code}>
-                  <button className="pick" onClick={() => setCourse(c)}>
-                    <strong>{c.code}</strong> <span className="muted">{c.title}</span>
+      <div className="course-head">
+        <span>
+          <strong>{course.code}</strong> <span className="muted">{course.title}</span>
+        </span>
+        {!initialCourse && (
+          <button className="link" onClick={() => pickCourse(null)}>
+            Change
+          </button>
+        )}
+      </div>
+
+      {groups.length > 1 && (
+        <fieldset className="pick-step">
+          <legend>1. Pick a lecture</legend>
+          {group ? (
+            <div className="choice on picked">
+              <span>
+                <strong>{group.label}</strong>
+                {lines(group.common, group.label)}
+              </span>
+              <button className="link" onClick={() => (setGroupId(null), setChoiceId(null))}>
+                Change
+              </button>
+            </div>
+          ) : (
+            <ul className="pick-list choices">
+              {groups.map((g) => (
+                <li key={g.id}>
+                  <button className="choice" onClick={() => (setGroupId(g.id), setChoiceId(null))}>
+                    <span>
+                      <strong>{g.label}</strong>
+                      {current.some((m) => m.section?.startsWith(`${g.id}-`) || m.section === g.id) && (
+                        <span className="day-badge">Current</span>
+                      )}
+                      {lines(g.common, g.label)}
+                      {clashNote(g.common)}
+                    </span>
                   </button>
                 </li>
               ))}
             </ul>
           )}
-          {query && results.length === 0 && <p className="muted small">No course with scheduled meetings matches.</p>}
-        </>
-      ) : (
-        <>
-          <div className="course-head">
-            <span>
-              <strong>{course.code}</strong> <span className="muted">{course.title}</span>
-            </span>
-            <button className="link" onClick={() => (setCourse(null), setChoiceId(null))}>
-              Change
-            </button>
-          </div>
-          {choices.length > 1 && <p className="muted small">Pick your section ({choices.length}):</p>}
-          <ul className="pick-list choices">
-            {choices.map((c) => (
-              <li key={c.id}>
-                <label className={`choice ${choice?.id === c.id ? "on" : ""}`}>
-                  <input type="radio" name="section" checked={choice?.id === c.id} onChange={() => setChoiceId(c.id)} />
-                  <span>
-                    <strong>{c.label}</strong>
-                    {c.meetings
-                      .filter((m) => m.kind === "class")
-                      .map((m, i) => (
-                        <span key={i} className="muted small block">
-                          {m.type} {sectionWhen(m)} · {sectionPlace(m, data)}
-                        </span>
-                      ))}
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
-          {choice && choice.meetings.some((m) => m.kind !== "class") && (
-            <p className="muted small">
-              Exams included:{" "}
-              {choice.meetings
-                .filter((m) => m.kind !== "class")
-                .map((m) => `${m.kind === "final" ? "Final" : "Midterm"} ${sectionWhen(m)}`)
-                .join("; ")}
-            </p>
-          )}
-          {clashes.length > 0 && <p className="warn small">Overlaps: {clashes.join(", ")}</p>}
-          <div className="form-row">
-            <button
-              className="primary"
-              disabled={!choice}
-              onClick={() =>
-                onAdd(
-                  course,
-                  toClassMeetings(course, choice!, buildingIdForCode, () => crypto.randomUUID()),
-                )
-              }
-            >
-              {replacing ? "Replace section" : "Add to schedule"}
-            </button>
-            <button onClick={onCancel}>Cancel</button>
-          </div>
-        </>
+        </fieldset>
       )}
-      {!course && (
-        <div className="form-row">
-          <button onClick={onCancel}>Cancel</button>
+
+      {group && group.choices.length > 1 && (
+        <fieldset className="pick-step">
+          <legend>
+            {groups.length > 1 ? "2. " : ""}Pick a {subKindLabel(group)}
+          </legend>
+          <ul className="pick-list choices">
+            {group.choices.map((c) => {
+              // Just this option's own classes: the lecture and exams come with every one.
+              const own = c.meetings.filter((m) => m.kind === "class" && !group.common.includes(m));
+              return (
+                <li key={c.id}>
+                  <button
+                    className={`choice ${choice?.id === c.id ? "on" : ""}`}
+                    aria-pressed={choice?.id === c.id}
+                    onClick={() => setChoiceId(c.id)}
+                  >
+                    <span>
+                      {lines(own, typeLabel(own[0]?.type))}
+                      {clashNote(own)}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </fieldset>
+      )}
+
+      {choice && (
+        <div className="adder-summary small">
+          {exams.length > 0 && (
+            <span className="muted block">
+              Exams:{" "}
+              {mergeExams(exams)
+                .map((e) => `${e.label} ${e.when} · ${e.places.map((p) => sectionPlace(p, data)).join(" or ")}`)
+                .join("; ")}
+            </span>
+          )}
+          {clashNote(choice.meetings)}
         </div>
       )}
+
+      <div className="form-row">
+        <button
+          className="primary"
+          disabled={!choice}
+          onClick={() =>
+            onAdd(
+              course,
+              toClassMeetings(course, choice!, buildingIdForCode, () => crypto.randomUUID()),
+            )
+          }
+        >
+          {!choice ? "Pick a section" : current.length ? "Switch to this section" : `Add ${course.code}`}
+        </button>
+        <button onClick={onCancel}>Cancel</button>
+      </div>
     </div>
   );
+}
+
+/** A lecture group ("001") and the discussions or labs you pick with it. */
+interface LectureGroup {
+  id: string;
+  label: string;
+  /** What everyone in the group attends (lecture, exams). */
+  common: SectionMeeting[];
+  choices: SectionChoice[];
+}
+
+function lectureGroups(choices: SectionChoice[]): LectureGroup[] {
+  const groups = new Map<string, LectureGroup>();
+  for (const c of choices) {
+    const id = c.id.split("-")[0];
+    let g = groups.get(id);
+    if (!g) {
+      // Shared meetings: in every choice of the group (all of them when there's one).
+      const common = c.meetings.filter((m) => !m.section.includes("-") || m.section.split("-")[1] === "000");
+      const classes = common.filter((m) => m.kind === "class");
+      const type = typeLabel(classes[0]?.type) || "Section";
+      g = { id, label: `${type} ${id}`, common: classes, choices: [] };
+      groups.set(id, g);
+    }
+    g.choices.push(c);
+  }
+  return [...groups.values()];
+}
+
+/** "discussion", "lab" or "section", from what the group's choices are. */
+function subKindLabel(g: LectureGroup): string {
+  const types = new Set(g.choices.flatMap((c) => c.meetings.filter((m) => m.kind === "class" && !g.common.includes(m)).map((m) => m.type)));
+  if (types.size === 1) return (typeLabel([...types][0]) || "section").toLowerCase();
+  return "section";
+}
+
+/** Exams held in several rooms at once (split by name or section) as one line. */
+function mergeExams(exams: SectionMeeting[]): { label: string; when: string; places: SectionMeeting[] }[] {
+  const out = new Map<string, { label: string; when: string; places: SectionMeeting[] }>();
+  for (const m of exams) {
+    const when = sectionWhen(m);
+    const key = `${m.type}|${when}`;
+    const e = out.get(key) ?? { label: m.kind === "final" ? "Final" : "Midterm", when, places: [] };
+    e.places.push(m);
+    out.set(key, e);
+  }
+  return [...out.values()];
+}
+
+/** The section a course's meetings came from, as students see it ("002", "A00"). */
+function sectionGroup(ms: ClassMeeting[]): string | undefined {
+  const sub = ms.find((m) => m.section && m.section.split("-")[1] && m.section.split("-")[1] !== "000")?.section;
+  const any = sub ?? ms.find((m) => m.section)?.section;
+  if (!any) return undefined;
+  const [group, s] = any.split("-");
+  return s && s !== "000" ? `${group}-${s}` : group;
 }
 
 /** Add or edit one meeting by hand. */
@@ -507,7 +694,7 @@ function MeetingForm({
 const DAY_START = 7 * 60;
 const DAY_END = 22 * 60;
 
-/** Mon–Fri grid of weekly meetings; tap one for directions. */
+/** Mon–Fri grid of weekly meetings, overlapping ones side by side; tap one for directions. */
 function WeekView({
   meetings,
   colorOf,
@@ -519,10 +706,12 @@ function WeekView({
 }) {
   const weekly = meetings.filter((m) => m.days.length > 0);
   const days: Weekday[] = weekly.some((m) => m.days.includes("Sa")) ? [...SCHOOL_DAYS, "Sa"] : SCHOOL_DAYS;
-  const hours = Array.from({ length: (DAY_END - DAY_START) / 60 }, (_, i) => DAY_START / 60 + i);
-  const pct = (min: number) => `${((min - DAY_START) / (DAY_END - DAY_START)) * 100}%`;
+  const first = Math.min(DAY_START, ...weekly.map((m) => Math.floor(minutes(m.start) / 60) * 60));
+  const last = Math.max(DAY_END, ...weekly.map((m) => Math.ceil(endMinutes(m) / 60) * 60));
+  const hours = Array.from({ length: (last - first) / 60 }, (_, i) => first / 60 + i);
+  const pct = (min: number) => `${((min - first) / (last - first)) * 100}%`;
   return (
-    <div className="week" style={{ ["--cols" as string]: days.length }}>
+    <div className="week" style={{ ["--cols" as string]: days.length, ["--hours" as string]: hours.length }}>
       <div className="week-hours">
         {hours.map((h) => (
           <span key={h} style={{ top: pct(h * 60) }}>
@@ -535,31 +724,34 @@ function WeekView({
         <div key={d} className="week-day">
           <div className="week-day-name">{d}</div>
           <div className="week-col">
-            {weekly
-              .filter((m) => m.days.includes(d))
-              .map((m) => {
-                const s = minutes(m.start);
-                const e = m.end ? minutes(m.end) : s + 50;
-                return (
-                  <button
-                    key={m.id}
-                    className="week-block"
-                    style={{
-                      top: pct(s),
-                      height: `calc(${pct(e)} - ${pct(s)})`,
-                      ["--course" as string]: colorOf(m.course),
-                    }}
-                    title={`${m.course} ${m.type ?? ""} ${m.start}${m.end ? `–${m.end}` : ""}`}
-                    onClick={() => onPick(m)}
-                    disabled={!m.buildingId}
-                  >
-                    <strong>{m.course}</strong> {m.type}
-                    <span>
-                      {m.buildingCode ?? ""} {m.room ?? ""}
-                    </span>
-                  </button>
-                );
-              })}
+            {lanes(weekly.filter((m) => m.days.includes(d))).map(({ m, lane, of }) => {
+              const s = minutes(m.start);
+              const e = endMinutes(m);
+              return (
+                <button
+                  key={m.id}
+                  className={`week-block ${of > 1 ? "clash" : ""}`}
+                  style={{
+                    top: pct(s),
+                    height: `calc(${pct(e)} - ${pct(s)})`,
+                    left: `calc(${(lane / of) * 100}% + 1px)`,
+                    width: `calc(${100 / of}% - 2px)`,
+                    ["--course" as string]: colorOf(m.course),
+                  }}
+                  title={`${m.course} ${typeLabel(m.type)} · ${whenLabel(m)}${of > 1 ? " · overlaps another class" : ""}`}
+                  onClick={() => onPick(m)}
+                  disabled={!m.buildingId}
+                >
+                  <strong>
+                    {m.course}
+                    {of === 1 && <small> {m.type}</small>}
+                  </strong>
+                  <span>
+                    {m.buildingCode ?? ""} {m.room ?? ""}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       ))}
@@ -567,11 +759,40 @@ function WeekView({
   );
 }
 
+/** Side-by-side columns for a day's meetings: each overlapping cluster split evenly. */
+function lanes(ms: ClassMeeting[]): { m: ClassMeeting; lane: number; of: number }[] {
+  const sorted = [...ms].sort((a, b) => minutes(a.start) - minutes(b.start));
+  const out: { m: ClassMeeting; lane: number; of: number }[] = [];
+  let cluster: { m: ClassMeeting; lane: number; of: number }[] = [];
+  let clusterEnd = -1;
+  const close = () => {
+    const of = Math.max(0, ...cluster.map((c) => c.lane)) + 1;
+    for (const c of cluster) c.of = of;
+    out.push(...cluster);
+    cluster = [];
+  };
+  for (const m of sorted) {
+    if (minutes(m.start) >= clusterEnd) close();
+    // The first lane that's free by this start.
+    const busy = new Set(cluster.filter((c) => endMinutes(c.m) > minutes(m.start)).map((c) => c.lane));
+    let lane = 0;
+    while (busy.has(lane)) lane++;
+    cluster.push({ m, lane, of: 1 });
+    clusterEnd = Math.max(clusterEnd, endMinutes(m));
+  }
+  close();
+  return out;
+}
+
 // --- helpers
 
 function minutes(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
   return h * 60 + m;
+}
+
+function endMinutes(m: ClassMeeting): number {
+  return m.end ? minutes(m.end) : minutes(m.start) + 50;
 }
 
 function sortMeetings(ms: ClassMeeting[]): ClassMeeting[] {
@@ -594,7 +815,14 @@ function whenLabel(m: ClassMeeting): string {
     const d = new Date(`${m.date}T00:00`);
     return `${d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} ${time}`;
   }
-  return `${m.days.join("")} ${time}`;
+  return `${daysLabel(m.days)} ${time}`;
+}
+
+const DAY_SHORT: Record<string, string> = { M: "Mon", Tu: "Tue", W: "Wed", Th: "Thu", F: "Fri", Sa: "Sat", Su: "Sun" };
+
+/** ["Tu", "Th"] -> "Tue/Thu". */
+function daysLabel(days: readonly string[]): string {
+  return days.map((d) => DAY_SHORT[d] ?? d).join("/");
 }
 
 function placeLabel(m: ClassMeeting, data: CampusData): string {
@@ -610,26 +838,26 @@ function sectionWhen(m: SectionMeeting): string {
     const d = new Date(`${m.date}T00:00`);
     return `${d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} ${time}`;
   }
-  return `${m.days.join("")} ${time}`;
+  return `${daysLabel(m.days)} ${time}`;
 }
 
 function sectionPlace(m: SectionMeeting, data: CampusData): string {
   if (!m.building) return "Online";
   const b = data.buildingByCode.get(m.building);
-  return `${b ? m.building : `${m.building} (not on map)`} ${m.room ?? ""}`.trim();
+  return `${b ? b.name : `${m.building} (not on the map yet)`} ${m.room ?? ""}`.trim();
 }
 
-/** Existing meetings a section would overlap with, as labels. */
-function findClashes(choice: SectionChoice, existing: ClassMeeting[]): string[] {
+/** Existing meetings these would overlap with, as labels. */
+function findClashes(meetings: SectionMeeting[], existing: ClassMeeting[]): string[] {
   const out = new Set<string>();
-  for (const m of choice.meetings) {
+  for (const m of meetings) {
     const s = minutes(m.start);
     const e = minutes(m.end);
     for (const x of existing) {
       const xs = minutes(x.start);
       const xe = x.end ? minutes(x.end) : xs + 50;
       const sameDay = m.date ? x.date === m.date : m.days.some((d) => x.days.includes(d));
-      if (sameDay && s < xe && xs < e) out.add(`${x.course} ${x.type ?? ""}`.trim());
+      if (sameDay && s < xe && xs < e) out.add(`${x.course} ${typeLabel(x.type).toLowerCase()}`.trim());
     }
   }
   return [...out];

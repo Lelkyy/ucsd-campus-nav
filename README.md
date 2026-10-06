@@ -22,10 +22,11 @@ the way, using the paths, stairs and bike paths students actually use.
   times, lines, walking, transfers, "every N min", fare, free with the UCSD
   U-Pass), sorted by Best route, Fewer transfers or Less walking, with Leave
   now / Depart at / Arrive by and a wheelchair-accessible option.
-- **Your schedule:** add courses from the Fall 2026 schedule by picking a
-  section; lectures, discussions, labs, midterms and the final come with it.
-  Edit anything, add your own events, see a week view, export/import a backup.
-  Saved in your browser.
+- **Your schedule:** add a course from the Fall 2026 schedule by picking a
+  lecture, then one of its discussions or labs (each option says what it would
+  overlap); midterms and the final come with it. Tap any class for directions,
+  change a section, undo a removal, see a week view, add your own events,
+  export/import a backup. Saved in your browser.
 - **Leave-by times:** for your next class, in whichever mode you picked.
 - **Every classroom:** 556 rooms across 84 building codes are mapped to
   buildings; the few that aren't are listed with the reason.

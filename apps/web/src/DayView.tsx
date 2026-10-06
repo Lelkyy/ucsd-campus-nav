@@ -56,7 +56,9 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
   const week = weekOf(day, meetings);
 
   // The class you're going to in each group: yours if you chose, else an exam or the earliest.
-  const picked = groups.map((g) => (g.length === 1 ? g[0] : (g.find((c) => c.meeting.id === choices[choiceKey(day, g)]) ?? defaultPick(g))));
+  const picked = groups.map((g) =>
+    g.length === 1 ? g[0] : (g.find((c) => c.meeting.id === choices[choiceKey(day, g)]) ?? defaultPick(g)),
+  );
   const pickedKey = picked.map((c) => c.meeting.id).join(",");
   const choose = (g: DayClass[], c: DayClass) => {
     const next = { ...choices, [choiceKey(day, g)]: c.meeting.id };
@@ -72,7 +74,11 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
         if (!prev || !prev.meeting.buildingId || !c.meeting.buildingId) return null;
         const gapMin = (c.startsAt.getTime() - classEnd(prev).getTime()) / 60_000;
         if (prev.meeting.buildingId === c.meeting.buildingId) return { prev, gapMin, same: true as const };
-        const route = estimateBetween(prev.meeting.buildingId, c.meeting.buildingId, new Date(c.startsAt.getTime() - CLASS_BUFFER_MIN * 60_000));
+        const route = estimateBetween(
+          prev.meeting.buildingId,
+          c.meeting.buildingId,
+          new Date(c.startsAt.getTime() - CLASS_BUFFER_MIN * 60_000),
+        );
         return { prev, gapMin, same: false as const, route };
       }),
     // `picked` is derived from these; its ids stand in for it.
@@ -93,16 +99,17 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
       byBuilding.set(b.id, pin);
     });
     const stops = [...byBuilding.values()].map((p) => ({ ...p, n: p.n.join(", "), label: p.label.join("\n") }));
-    const lines = legs.flatMap((l, i) => (l && !l.same && l.route ? [{ coordinates: l.route.coordinates, color: colorOf(picked[i].meeting.course) }] : []));
+    const lines = legs.flatMap((l, i) =>
+      l && !l.same && l.route ? [{ coordinates: l.route.coordinates, color: colorOf(picked[i].meeting.course) }] : [],
+    );
     onOverlay(stops.length ? { stops, lines } : null);
   }, [legs, onOverlay]);
   useEffect(() => () => onOverlay?.(null), [onOverlay]);
 
   const shift = (days: number) => setDay((d) => addDays(d, days));
   const isToday = day.getTime() === today.getTime();
-  const conflicts = groups.filter((g) => g.length > 1).length;
 
-  const card = (c: DayClass, opts: { primary: boolean; skipped?: boolean; onPick?: () => void; picked?: boolean }) => {
+  const card = (c: DayClass, opts: { primary: boolean; skipped?: boolean; onPick?: () => void; picked?: boolean; room?: boolean }) => {
     const m = c.meeting;
     const b = data.buildingById.get(m.buildingId);
     const floor = b && m.room ? roomFloor(data.indoor[b.id], m.room) : undefined;
@@ -114,7 +121,13 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
         className={`day-class ${done ? "done" : ""} ${happening ? "now" : ""} ${opts.skipped ? "skipped" : ""} ${opts.onPick ? "pickable" : ""}`}
         style={{ ["--course" as string]: colorOf(m.course) }}
         {...(opts.onPick
-          ? { role: "radio", "aria-checked": !!opts.picked, tabIndex: 0, onClick: opts.onPick, onKeyDown: (e: KeyboardEvent) => (e.key === " " || e.key === "Enter") && opts.onPick!() }
+          ? {
+              role: "radio",
+              "aria-checked": !!opts.picked,
+              tabIndex: 0,
+              onClick: opts.onPick,
+              onKeyDown: (e: KeyboardEvent) => (e.key === " " || e.key === "Enter") && opts.onPick!(),
+            }
           : {})}
       >
         <span className="day-time">
@@ -127,10 +140,14 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
             {m.course} <span className="muted">{m.type ? (MEETING_TYPES[m.type] ?? m.type) : ""}</span>
             {happening && <span className="day-badge">Now</span>}
             {exam && <span className="day-badge exam">Exam</span>}
-            {opts.skipped && <span className="day-badge skip">Skipping</span>}
+            {opts.skipped && !opts.room && <span className="day-badge skip">Skipping</span>}
           </span>
           <span className="muted small">
-            {b ? `${b.name}${m.room ? ` ${m.room}` : ""}` : m.buildingCode ? `${m.buildingCode} ${m.room ?? ""} (not on the map yet)` : "Online / no location"}
+            {b
+              ? `${b.name}${m.room ? ` ${m.room}` : ""}`
+              : m.buildingCode
+                ? `${m.buildingCode} ${m.room ?? ""} (not on the map yet)`
+                : "Online / no location"}
             {floor && ` · ${floorPhrase(floor)}`}
           </span>
         </span>
@@ -174,26 +191,25 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
           const on = d.getTime() === day.getTime();
           const dayGroups = groupOverlaps(dayClasses(meetings, d));
           const count = dayGroups.flat().length;
-          const clash = dayGroups.some((g) => g.length > 1);
+          const clash = dayGroups.some((g) => g.length > 1 && !roomSplit(g));
           return (
-            <button key={d.getTime()} role="radio" aria-checked={on} className={`day-chip ${on ? "on" : ""}`} onClick={() => setDay(d)}>
-              <span>{d.toLocaleDateString([], { weekday: "short" })}</span>
-              <span className="day-chip-count">
-                {count || "–"}
-                {clash && <span className="day-chip-clash" title="Has a conflict"> !</span>}
+            <button
+              key={d.getTime()}
+              role="radio"
+              aria-checked={on}
+              className={`day-chip ${on ? "on" : ""} ${d.getTime() === today.getTime() ? "today" : ""}`}
+              onClick={() => setDay(d)}
+            >
+              <span className="day-chip-name">
+                {d.toLocaleDateString([], { weekday: "short" })}
+                {d.getTime() === today.getTime() && <span className="sr-only"> (today)</span>}
               </span>
-              {d.getTime() === today.getTime() && <span className="day-chip-today" aria-label="today" />}
+              <span className="day-chip-count">{count ? `${count} class${count === 1 ? "" : "es"}` : "Free"}</span>
+              {clash && <span className="day-chip-clash" title="Classes overlap" aria-label="classes overlap" />}
             </button>
           );
         })}
       </div>
-
-      {conflicts > 0 && (
-        <p className="day-conflict-note" role="note">
-          {conflicts === 1 ? "Two classes overlap" : `${conflicts} sets of classes overlap`} {isToday ? "today" : "this day"}. Pick which to go to; the
-          walks follow your choice.
-        </p>
-      )}
 
       {classes.length === 0 ? (
         <p className="muted small day-empty">
@@ -223,7 +239,8 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
                         <>Same building · {gapText(leg.gapMin)}</>
                       ) : leg.route ? (
                         <>
-                          {Math.ceil(leg.route.minutes)} min to {b?.name ?? "the next class"} ({formatDistance(leg.route.meters)}) · {gapText(leg.gapMin)}
+                          {Math.ceil(leg.route.minutes)} min to {b?.name ?? "the next class"} ({formatDistance(leg.route.meters)}) ·{" "}
+                          {gapText(leg.gapMin)}
                           {leg.route.minutes + CLASS_BUFFER_MIN > leg.gapMin && <strong> · tight, leave right away</strong>}
                         </>
                       ) : (
@@ -240,13 +257,35 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
                 {g.length === 1 ? (
                   card(chosen, { primary: gi === 0 || !leg || leg.same })
                 ) : (
-                  <div className="day-conflict" role="radiogroup" aria-label={`Conflict at ${clock(g[0].startsAt)}: choose a class`}>
+                  <div
+                    className={`day-conflict ${roomSplit(g) ? "rooms" : ""}`}
+                    role="radiogroup"
+                    aria-label={`${roomSplit(g) ? "Exam rooms" : "Conflict"} at ${clock(g[0].startsAt)}: choose one`}
+                  >
                     <div className="day-conflict-head">
-                      <strong>Conflict</strong> · {clock(g[0].startsAt)} – {clock(new Date(Math.max(...g.map((c) => classEnd(c).getTime()))))} · choose one
+                      {roomSplit(g) ? (
+                        <>
+                          <strong>
+                            {g[0].meeting.course} {MEETING_TYPES[g[0].meeting.type ?? ""] ?? "exam"}
+                          </strong>{" "}
+                          is in {g.length} rooms · pick yours
+                        </>
+                      ) : (
+                        <>
+                          <strong>Overlap</strong> · {clock(g[0].startsAt)} –{" "}
+                          {clock(new Date(Math.max(...g.map((c) => classEnd(c).getTime()))))} · pick the one you're going to
+                        </>
+                      )}
                     </div>
                     {g.map((c) => (
                       <div key={c.meeting.id}>
-                        {card(c, { primary: c === chosen, picked: c === chosen, skipped: c !== chosen, onPick: () => choose(g, c) })}
+                        {card(c, {
+                          primary: c === chosen,
+                          picked: c === chosen,
+                          skipped: c !== chosen,
+                          room: roomSplit(g),
+                          onPick: () => choose(g, c),
+                        })}
                       </div>
                     ))}
                   </div>
@@ -257,6 +296,14 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
         </ol>
       )}
     </div>
+  );
+}
+
+/** One exam held in several rooms (split by last name or section): a choice, not a conflict. */
+function roomSplit(group: DayClass[]): boolean {
+  const [a] = group;
+  return group.every(
+    (c) => c.meeting.course === a.meeting.course && c.meeting.type === a.meeting.type && c.meeting.start === a.meeting.start,
   );
 }
 
