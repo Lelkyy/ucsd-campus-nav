@@ -44,7 +44,7 @@ export const PROFILES = {
       [EdgeKind.BikeOnly]: 0,
     },
     // Prefer footpaths, then sidewalks along roads; connector roads only when nothing else goes there.
-    prefer: { [EdgeKind.Bike]: 1.1, [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Road]: 1.5 },
+    prefer: { [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Road]: 1.5 },
   },
   accessible: {
     id: "accessible",
@@ -60,7 +60,7 @@ export const PROFILES = {
       [EdgeKind.Steps]: 0,
       [EdgeKind.BikeOnly]: 0,
     },
-    prefer: { [EdgeKind.Bike]: 1.1, [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Road]: 1.5 },
+    prefer: { [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Road]: 1.5 },
   },
   bike: {
     id: "bike",

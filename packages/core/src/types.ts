@@ -5,7 +5,7 @@ export const EdgeKind = {
   /** footway, pedestrian plaza, corridor: walk; cyclists walk their bike */
   Path: 0,
   Steps: 1,
-  /** cycleway or path designated for bikes; walkable too */
+  /** cycleway or path designated for bikes; walked like a footpath (even if tagged foot=no) */
   Bike: 2,
   /** traced by hand into data/custom-paths.geojson */
   Custom: 3,

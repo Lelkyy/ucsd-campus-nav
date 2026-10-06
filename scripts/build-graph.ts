@@ -915,12 +915,13 @@ function edgeKind(tags: Record<string, string>): { kind: EdgeKind; bikeOk: boole
   const yes = (v?: string) => v === "yes" || v === "designated" || v === "permissive";
   const noFoot = tags.foot === "no" || (tags.access === "no" && !yes(tags.foot));
   const noBike = tags.bicycle === "no" || tags.bicycle === "dismount" || (tags.access === "no" && !yes(tags.bicycle));
+  // Bike paths are walkable whatever their foot tag says: pedestrians use them here.
+  if (hw === "cycleway") return { kind: EdgeKind.Bike, bikeOk: !noBike };
   if (noFoot) {
-    // Not walkable, but maybe rideable (some cycleways and roads).
-    return (hw === "cycleway" || ROAD_HIGHWAYS.has(hw)) && !noBike ? { kind: EdgeKind.BikeOnly, bikeOk: true } : null;
+    // Not walkable, but maybe rideable (roads).
+    return ROAD_HIGHWAYS.has(hw) && !noBike ? { kind: EdgeKind.BikeOnly, bikeOk: true } : null;
   }
   if (hw === "steps") return { kind: EdgeKind.Steps, bikeOk: false };
-  if (hw === "cycleway") return { kind: EdgeKind.Bike, bikeOk: true };
   if (PATH_HIGHWAYS.has(hw)) {
     if (tags.bicycle === "designated") return { kind: EdgeKind.Bike, bikeOk: true };
     // highway=path allows bikes unless signed otherwise; footways only when tagged.

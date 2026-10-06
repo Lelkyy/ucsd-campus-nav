@@ -45,6 +45,8 @@ data/private/* (TSS) ──────┘                               ▼
   - **Edge kinds:** footpaths, stairs, bike paths, shared paths (bikes allowed
     but not designated), roads with sidewalks, connector roads, and bike-only
     roads.
+  - **Bike paths** are walked exactly like footpaths, whatever their `foot`
+    tag says: pedestrians use them here.
   - **Roads with sidewalks** (`hasSidewalk`) are walked like footpaths
     (a 5% preference for paths) and ridden like roads: OSM `sidewalk`,
     `sidewalk:both|left|right` = both/left/right/yes, or, with no sidewalk tag
