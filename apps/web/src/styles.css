@@ -423,30 +423,40 @@ button.link.danger { color: var(--danger); }
 .course-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .course-head strong { font-size: 14px; }
 .course-name { min-width: 0; }
-.meeting-list { list-style: none; margin: 6px 0 0; padding: 0; }
-.meeting-row { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); }
-.meeting-row:last-child { border-bottom: none; }
-.meeting {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 84px 1fr auto;
-  align-items: center;
-  gap: 10px;
+.course-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   min-width: 0;
-  padding: 7px 4px;
+  padding: 0;
   border: none;
-  border-radius: 6px;
   background: none;
   color: var(--text);
   font-weight: 400;
   text-align: left;
 }
-.meeting:hover:not(:disabled) { background: var(--surface-2); border-color: transparent; }
-.meeting:disabled { opacity: 1; cursor: default; }
-.meeting-type { font-size: 12px; font-weight: 600; color: var(--muted); }
-.meeting-main { display: flex; flex-direction: column; font-size: 13px; min-width: 0; }
-.meeting-main > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meeting-go { color: var(--muted); font-size: 18px; line-height: 1; }
+.course-toggle:hover:not(:disabled) { border-color: transparent; }
+.course-chevron {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.course.open .course-chevron { transform: rotate(45deg); margin-top: 4px; }
+/* Like the arrival card: a label column and what it is. */
+.course-table { margin: 8px 0 0; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.course-table > div { display: grid; grid-template-columns: 78px 1fr auto; align-items: start; gap: 8px; font-size: 13px; }
+.course-table > div + div { padding-top: 8px; border-top: 1px solid var(--border); }
+.course-table dt { color: var(--muted); font-weight: 600; font-size: 12px; padding-top: 1px; }
+.course-table dd { margin: 0; display: flex; flex-direction: column; min-width: 0; }
+.course-table-actions { display: flex; gap: 10px; font-size: 12.5px; }
+.course-table > .course-table-edit { display: block; }
+.course-table > .course-table-foot { display: flex; justify-content: flex-end; gap: 14px; font-size: 12.5px; }
+.course-toggle { width: 100%; }
 .row-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; font-size: 13px; }
 
 .adder {

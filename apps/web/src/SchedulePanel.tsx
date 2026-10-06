@@ -124,6 +124,14 @@ export function SchedulePanel({
   const [addingCustom, setAddingCustom] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Courses opened to show their lecture, discussion and exams.
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const toggleOpen = (course: string) =>
+    setOpen((cur) => {
+      const next = new Set(cur);
+      if (!next.delete(course)) next.add(course);
+      return next;
+    });
   // The last course removed, to put back.
   const [removed, setRemoved] = useState<ClassMeeting[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -219,68 +227,72 @@ export function SchedulePanel({
                 // Courses from the catalog are changed by section; hand-made events meeting by meeting.
                 const fromCatalog = !!data.sections && own.some((m) => m.section);
                 const section = sectionGroup(own);
+                const isOpen = open.has(course);
+                const main = own.find((m) => !m.date) ?? own[0];
                 return (
-                  <li key={course} className="course" style={{ ["--course" as string]: colorOf(course) }}>
+                  <li key={course} className={`course ${isOpen ? "open" : ""}`} style={{ ["--course" as string]: colorOf(course) }}>
                     <div className="course-head">
-                      <span className="course-name">
-                        <strong>{course}</strong>
-                        {section && <span className="muted small"> · Section {section}</span>}
-                      </span>
-                      <span className="row-actions">
-                        {fromCatalog && (
-                          <button className="link" onClick={() => setAdding(course)}>
-                            Change section
-                          </button>
-                        )}
-                        <button className="link danger" onClick={() => removeCourse(course)}>
-                          Remove
-                        </button>
-                      </span>
+                      <button className="course-toggle" aria-expanded={isOpen} onClick={() => toggleOpen(course)}>
+                        <span className="course-chevron" aria-hidden="true" />
+                        <span className="course-name">
+                          <strong>{course}</strong>
+                          {section && <span className="muted small"> · Section {section}</span>}
+                          <span className="muted small block">
+                            {titleOf(course) ?? (main ? `${typeLabel(main.type) || "Class"} ${whenLabel(main)}` : "")}
+                          </span>
+                        </span>
+                      </button>
                     </div>
-                    {titleOf(course) && <div className="muted small">{titleOf(course)}</div>}
-                    <ul className="meeting-list">
-                      {own.map((m) =>
-                        editingId === m.id ? (
-                          <li key={m.id}>
-                            <MeetingForm
-                              data={data}
-                              initial={m}
-                              submitLabel="Save"
-                              onCancel={() => setEditingId(null)}
-                              onSubmit={(patch) => {
-                                schedule.update(m.id, patch);
-                                setEditingId(null);
-                              }}
-                            />
-                          </li>
-                        ) : (
-                          <li key={m.id} className="meeting-row">
-                            <button
-                              className="meeting"
-                              disabled={!m.buildingId}
-                              title={m.buildingId ? "Directions" : undefined}
-                              onClick={() => onDirections(m)}
-                            >
-                              <span className="meeting-type">{typeLabel(m.type) || "Class"}</span>
-                              <span className="meeting-main">
+                    {isOpen && (
+                      <dl className="course-table">
+                        {own.map((m) =>
+                          editingId === m.id ? (
+                            <div key={m.id} className="course-table-edit">
+                              <MeetingForm
+                                data={data}
+                                initial={m}
+                                submitLabel="Save"
+                                onCancel={() => setEditingId(null)}
+                                onSubmit={(patch) => {
+                                  schedule.update(m.id, patch);
+                                  setEditingId(null);
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div key={m.id}>
+                              <dt>{typeLabel(m.type) || "Class"}</dt>
+                              <dd>
                                 <span>{whenLabel(m)}</span>
                                 <span className={m.buildingId ? "muted" : "warn"}>{placeLabel(m, data)}</span>
+                              </dd>
+                              <span className="course-table-actions">
+                                {!fromCatalog && (
+                                  <button className="link" onClick={() => setEditingId(m.id)}>
+                                    Edit
+                                  </button>
+                                )}
+                                {m.buildingId && (
+                                  <button className="link" onClick={() => onDirections(m)}>
+                                    Directions
+                                  </button>
+                                )}
                               </span>
-                              {m.buildingId && (
-                                <span className="meeting-go" aria-hidden="true">
-                                  ›
-                                </span>
-                              )}
+                            </div>
+                          ),
+                        )}
+                        <div className="course-table-foot">
+                          {fromCatalog && (
+                            <button className="link" onClick={() => setAdding(course)}>
+                              Change section
                             </button>
-                            {!fromCatalog && (
-                              <button className="link" onClick={() => setEditingId(m.id)}>
-                                Edit
-                              </button>
-                            )}
-                          </li>
-                        ),
-                      )}
-                    </ul>
+                          )}
+                          <button className="link danger" onClick={() => removeCourse(course)}>
+                            Remove course
+                          </button>
+                        </div>
+                      </dl>
+                    )}
                   </li>
                 );
               })}
