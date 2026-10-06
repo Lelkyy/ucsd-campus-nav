@@ -179,12 +179,14 @@ The **Map** button picks one of two campus maps (kept in `localStorage`,
   (experience.arcgis.com/experience/c97d6e2efd7947d38738d5184b2debc7) is drawn
   on: Esri World Topographic, with UCSD's own campus boundary and district names
   from its campus vector tiles (`UCSD_LAYERS`, fonts swapped to Noto Sans).
-  The tiles are pale, so they're drawn with stronger color
-  (`raster-saturation`) and whites toned down a little; raising
-  `raster-contrast` instead bleaches the light colors to white.
-  Its tiles leave out most footpaths, so OpenStreetMap's paths (`path` and
-  `pedestrian`, not tunnels) are drawn on top from zoom 15: white with a soft
-  purple edge (`campus-paths`, `campus-paths-casing`).
+  The tiles are muted toward gray (`raster-saturation`), and campus is drawn
+  on them from UCSD's own ground-level layer in the same vector tiles
+  (`UCSD_GROUND`, by `_symbol`): sage lawns, cream walkways, warm gray
+  buildings with a darker edge, clay for the track, in the app's palette.
+  (Raising `raster-contrast` on the tiles only bleaches their light colors.)
+  OpenStreetMap's footpaths (`path` and `pedestrian`, not tunnels) go on top
+  from zoom 15 for the small ones UCSD's layer leaves out: white with a soft
+  warm edge (`campus-paths`, `campus-paths-casing`).
 - **Illustrated:** UC San Diego's drawn campus map, the Concept3D tiles behind
   the old maps.ucsd.edu (`assets.concept3d.com/assets/1005/1005_Map_9`, TMS
   rows, zoom 13 to 20). Around it, where the drawing stops, OpenStreetMap is

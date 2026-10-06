@@ -155,16 +155,19 @@ export function MapView(props: MapViewProps) {
         maxzoom: 19,
         attribution: "Campus map © UC San Diego, Esri",
       });
-      // Esri's tiles are pale: stronger color (not contrast, which only bleaches light colors) so buildings stand off the campus ground and white paths read.
+      // Esri's topographic tiles, quieted toward gray: campus itself is drawn on them in the app's colors.
       map.addLayer({
         id: "topo",
         type: "raster",
         source: "topo",
-        paint: { "raster-saturation": 0.7, "raster-brightness-max": 0.93 },
+        paint: { "raster-saturation": -0.45, "raster-brightness-max": 0.97 },
       });
-      // The campus map leaves out most footpaths: OpenStreetMap's, on top of it, white with a soft edge.
+      // UCSD's own ground-level campus drawing (lawns, walkways, buildings...), in the app's palette.
+      map.addSource("ucsd", { type: "vector", tiles: [UCSD_VECTOR_TILES], minzoom: 0, maxzoom: 16 });
+      for (const layer of UCSD_GROUND) map.addLayer(layer);
+      // The campus map leaves out most footpaths: OpenStreetMap's, on top of it, white with a soft warm edge.
       for (const [id, color, width] of [
-        ["campus-paths-casing", "#b9a8c8", [15, 2.2, 17, 4, 20, 11]],
+        ["campus-paths-casing", "#bdb5a1", [15, 2.2, 17, 4, 20, 11]],
         ["campus-paths", "#ffffff", [15, 1, 17, 2.2, 20, 7]],
       ] as const) {
         map.addLayer({
@@ -194,7 +197,6 @@ export function MapView(props: MapViewProps) {
         attribution: "Illustrated map © UC San Diego",
       });
       map.addLayer({ id: "illustrated", type: "raster", source: "illustrated", layout: { visibility: "none" } });
-      map.addSource("ucsd", { type: "vector", tiles: [UCSD_VECTOR_TILES], minzoom: 0, maxzoom: 16 });
       for (const layer of UCSD_LAYERS) map.addLayer({ ...layer, layout: { ...layer.layout, visibility: "none" } } as LayerSpecification);
 
       for (const id of ["route", "connectors", "stops", "doors", "day", "places"]) {
@@ -391,6 +393,7 @@ export function MapView(props: MapViewProps) {
     map.setLayoutProperty("topo", "visibility", vis(!illustrated));
     map.setLayoutProperty("campus-paths-casing", "visibility", vis(!illustrated));
     map.setLayoutProperty("campus-paths", "visibility", vis(!illustrated));
+    for (const layer of UCSD_GROUND) map.setLayoutProperty(layer.id, "visibility", vis(!illustrated));
     map.setLayoutProperty("illustrated", "visibility", vis(illustrated));
     for (const { id, type } of osmLayers.current) {
       if (type !== "background") map.setLayoutProperty(id, "visibility", vis(illustrated && showsUnderDrawing(id, type)));
@@ -703,6 +706,57 @@ function showsUnderDrawing(id: string, type: string): boolean {
   if (type === "symbol" || type === "fill-extrusion" || type === "raster") return false;
   return !/boundary|aeroway|_pattern$|hatching/.test(id);
 }
+
+/**
+ * UCSD's ground-level campus drawing ("Ground Level Basemap" in its vector
+ * tiles, by `_symbol`), in the app's colors: sage lawns, cream walkways, warm
+ * gray buildings with a darker edge, clay for the track.
+ */
+const GROUND_COLORS: [number[], string][] = [
+  [[3], "#d3cdbd"], // buildings
+  [[10, 16, 1, 21, 23, 24], "#cbd8ad"], // grass, planters, fields, courts
+  [[25, 20, 2, 4, 5, 6, 7, 9, 12], "#f8f5ec"], // walkways, sidewalks, bike paths, curbs, piers
+  [[22, 29], "#dedbd1"], // streets, service roads
+  [[15, 13], "#d4d1c7"], // parking, hardcourt
+  [[8, 28, 11], "#e4d9c1"], // dirt, mulch, gravel
+  [[18], "#efe5c8"], // sand
+  [[17], "#b9d8e2"], // pools and fountains
+  [[0], "#d1a995"], // athletic track
+  [[14, 19, 26, 27, 30], "#e8e4d8"], // walls, rock, sheds, other structures
+];
+const UCSD_GROUND: LayerSpecification[] = [
+  {
+    id: "ucsd-ground",
+    type: "fill",
+    source: "ucsd",
+    "source-layer": "Ground Level Basemap",
+    minzoom: 14,
+    layout: { visibility: "none" },
+    paint: {
+      "fill-color": ["match", ["get", "_symbol"], ...GROUND_COLORS.flatMap(([ids, c]) => [ids, c]), "#e8e4d8"] as unknown as ExpressionSpecification,
+      "fill-opacity": ["interpolate", ["linear"], ["zoom"], 14, 0, 14.6, 1],
+    },
+  },
+  {
+    id: "ucsd-ground-buildings-edge",
+    type: "line",
+    source: "ucsd",
+    "source-layer": "Ground Level Basemap",
+    minzoom: 15,
+    filter: ["==", ["get", "_symbol"], 3],
+    layout: { visibility: "none", "line-join": "round" },
+    paint: { "line-color": "#9a927e", "line-width": ["interpolate", ["linear"], ["zoom"], 15, 0.6, 18, 1.4] },
+  },
+  {
+    id: "ucsd-construction",
+    type: "fill",
+    source: "ucsd",
+    "source-layer": "Construction Buildings",
+    minzoom: 14,
+    layout: { visibility: "none" },
+    paint: { "fill-color": "#e6dfc6", "fill-outline-color": "#9a927e" },
+  },
+];
 
 /** The popup for a tapped place. */
 function placeCard(name: string, kind: string, building: string, onGo: () => void): HTMLElement {
