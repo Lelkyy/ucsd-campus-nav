@@ -200,7 +200,10 @@ The **Map** button picks one of two campus maps (kept in `localStorage`,
   rows, zoom 13 to 20). Around it, where the drawing stops, OpenStreetMap is
   drawn in the drawing's colors (`ILLUSTRATED_PAINT`, sampled from its tiles:
   greens, gray roads, cream footpaths, pale gray roofs), with its labels, icons,
-  3D buildings and borders off so nothing lands on the drawing.
+  3D buildings and borders off so nothing lands on the drawing. The drawing's
+  edge is softened by a blurred band of its grass green (~40 m on the ground)
+  along its outline, traced once from its tiles' transparency into
+  `apps/web/public/data/illustrated-edge.json`.
 
 In Campus mode the topographic map covers all of OpenStreetMap's drawing.
 

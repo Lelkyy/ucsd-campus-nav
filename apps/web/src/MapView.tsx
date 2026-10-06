@@ -201,6 +201,20 @@ export function MapView(props: MapViewProps) {
         attribution: "Illustrated map © UC San Diego",
       });
       map.addLayer({ id: "illustrated", type: "raster", source: "illustrated", layout: { visibility: "none" } });
+      // The drawing stops abruptly: a soft band of the surrounding green along its outline (traced
+      // from its tiles) blends it into the map around it. ~40 m wide on the ground at every zoom.
+      map.addSource("illustrated-edge", { type: "geojson", data: "/data/illustrated-edge.json" });
+      map.addLayer({
+        id: "illustrated-edge",
+        type: "line",
+        source: "illustrated-edge",
+        layout: { visibility: "none", "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": ILLUSTRATED_GROUND,
+          "line-width": ["interpolate", ["exponential", 2], ["zoom"], 13, 3, 20, 384],
+          "line-blur": ["interpolate", ["exponential", 2], ["zoom"], 13, 3, 20, 384],
+        },
+      });
       for (const layer of UCSD_LAYERS) map.addLayer({ ...layer, layout: { ...layer.layout, visibility: "none" } } as LayerSpecification);
 
       for (const id of ["route", "connectors", "stops", "doors", "day", "places"]) {
@@ -399,10 +413,11 @@ export function MapView(props: MapViewProps) {
     map.setLayoutProperty("campus-paths", "visibility", vis(!illustrated));
     for (const layer of UCSD_GROUND) map.setLayoutProperty(layer.id, "visibility", vis(!illustrated));
     map.setLayoutProperty("illustrated", "visibility", vis(illustrated));
+    map.setLayoutProperty("illustrated-edge", "visibility", vis(illustrated));
     for (const { id, type } of osmLayers.current) {
       if (type !== "background") map.setLayoutProperty(id, "visibility", vis(illustrated && showsUnderDrawing(id, type)));
       // What shows while tiles load: the drawing's green, or the campus map's pale ground.
-      else map.setPaintProperty(id, "background-color", illustrated ? "#9cb478" : "#ece8ef");
+      else map.setPaintProperty(id, "background-color", illustrated ? ILLUSTRATED_GROUND : "#ece8ef");
     }
     for (const layer of UCSD_LAYERS) map.setLayoutProperty(layer.id, "visibility", vis(props.baseMap === "campus"));
   }, [ready, props.baseMap]);
@@ -677,8 +692,11 @@ const UCSD_LAYERS = [
  * OpenStreetMap in the illustrated map's colors (sampled from its tiles): grass
  * and wooded canyons in greens, gray roads, cream footpaths, pale gray roofs.
  */
+/** The drawing's grass green: the ground around it, and its blended edge. */
+const ILLUSTRATED_GROUND = "#9cb478";
+
 const ILLUSTRATED_PAINT: [RegExp, "background-color" | "fill-color" | "line-color", string][] = [
-  [/^background$/, "background-color", "#9cb478"],
+  [/^background$/, "background-color", ILLUSTRATED_GROUND],
   [/^landcover_(grass|wetland)$|^landuse_(pitch|track|cemetery)$/, "fill-color", "#9cb878"],
   [/^park$/, "fill-color", "#90b06c"],
   [/^park_outline$/, "line-color", "#7c9c58"],
