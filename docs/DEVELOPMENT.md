@@ -185,6 +185,14 @@ Fraunces for a few headings. The logo files are in `apps/web/public/`
 
 The map shows only the stops a route boards or leaves at.
 
+## Your location
+
+When the browser already allows location (`navigator.permissions`), the app
+follows you (`watchPosition`) and keeps your dot on the map, starting as soon
+as permission is given; it never asks by itself (the locate buttons do). The
+position moves only after ~10 m, so GPS jitter doesn't re-plan everything that
+starts from it.
+
 ## Map styles and places
 
 The **Map** button picks one of two campus maps (kept in `localStorage`,

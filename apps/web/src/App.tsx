@@ -1,5 +1,6 @@
 import {
   CampusSearch,
+  haversine,
   MODES,
   buildSteps,
   findRoom,
@@ -99,7 +100,43 @@ export function App() {
     const saved = storage.get<string>("campus-nav:mode", "walk");
     return saved in MODES ? (saved as ModeId) : "walk";
   });
-  const [myLocation, setMyLocation] = useState<LngLat | null>(null);
+  const [myLocation, setMyLocationRaw] = useState<LngLat | null>(null);
+  // Small GPS jitter would re-plan everything that starts from your location; move the dot every ~10 m.
+  const setMyLocation = useCallback(
+    (p: LngLat) => setMyLocationRaw((cur) => (cur && haversine(cur[0], cur[1], p[0], p[1]) < 10 ? cur : p)),
+    [],
+  );
+  // Where you are, on the map whenever the browser already allows it (never asks by itself:
+  // the locate buttons do that). Follows you, and starts as soon as permission is given.
+  useEffect(() => {
+    if (!navigator.geolocation || !navigator.permissions) return;
+    let watch: number | null = null;
+    let status: PermissionStatus | null = null;
+    const follow = (on: boolean) => {
+      if (on && watch === null) {
+        watch = navigator.geolocation.watchPosition(
+          (pos) => setMyLocation([pos.coords.longitude, pos.coords.latitude]),
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 15_000 },
+        );
+      } else if (!on && watch !== null) {
+        navigator.geolocation.clearWatch(watch);
+        watch = null;
+      }
+    };
+    navigator.permissions
+      .query({ name: "geolocation" })
+      .then((s) => {
+        status = s;
+        follow(s.state === "granted");
+        s.onchange = () => follow(s.state === "granted");
+      })
+      .catch(() => {});
+    return () => {
+      follow(false);
+      if (status) status.onchange = null;
+    };
+  }, [setMyLocation]);
   const [locating, setLocating] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
 
@@ -502,7 +539,7 @@ export function App() {
           reportPin={tab === "report" ? reportPin : null}
           pickingSpot={tab === "report"}
           focus={focus}
-          userPos={navigating ? userPos : null}
+          userPos={navigating ? userPos : myLocation}
           follow={navigating}
           doors={(destBuilding?.entrances ?? []).map((d) => ({ lngLat: d.lngLat, used: d === inside?.entrance }))}
           room={
