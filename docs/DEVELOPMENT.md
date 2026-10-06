@@ -10,6 +10,7 @@
 | `npm run typecheck` | TypeScript across all packages |
 | `npm run build:graph` | Rebuild the map data from cached downloads + edits + private schedule |
 | `npm run fetch:osm` | Re-download OpenStreetMap data and the shuttle timetable, then rebuild |
+| `npm run fetch:places` | Re-download UCSD's campus places (restrooms, food, water, bike racks...) into `apps/web/public/data/campus-places.json` |
 | `npm run fetch:rooms` | Re-scrape building/room lists from the old public Schedule of Classes (terms up to Summer 2026) |
 
 ## How it fits together
@@ -167,6 +168,30 @@ The map shows only the stops a route boards or leaves at. The base map's own
 bus, trolley and station icons are filtered out on load (`poi_transit`, and
 transit classes in the `poi_r*` layers).
 
+## Map styles and places
+
+The **Map** button switches what's under the routes (kept in `localStorage`,
+`campus-nav:base-map`); the app's layers stay on top of every one:
+
+- **Map:** OpenFreeMap, recolored (`tintBaseMap`).
+- **Illustrated:** UC San Diego's drawn campus map, the Concept3D tiles behind
+  the old maps.ucsd.edu (`assets.concept3d.com/assets/1005/1005_Map_9`, TMS
+  rows, zoom 13 to 20). Transparent off campus, where the base map shows.
+- **Campus:** what the official ArcGIS campus map
+  (experience.arcgis.com/experience/c97d6e2efd7947d38738d5184b2debc7) is drawn
+  on: Esri World Topographic, with UCSD's own campus boundary and district names
+  from its campus vector tiles (`UCSD_LAYERS`, fonts swapped to Noto Sans).
+- **Satellite:** Esri World Imagery.
+
+The illustrated and campus maps hide the base map's labels and icons, which
+would double their own.
+
+**Places** come from the same campus map's "Campus Points Of Interest - Public"
+layer, grouped into nine categories in `scripts/fetch-campus-places.ts`
+(internal ones like waypoints, offices and conference rooms are left out) and
+toggled from the Map button (`campus-nav:place-categories`). Tapping one shows
+what and where it is, with Directions here. UCSD's points can be 10–60 m off.
+
 ## Search
 
 `CampusSearch` (`packages/core/src/campusSearch.ts`, on
@@ -271,3 +296,6 @@ makes MTS free, and the app assumes you have one unless you untick it. Update
   terms forbid using its trademarks or implying endorsement).
 - Satellite imagery: Esri World Imagery, used for development/tracing. A public
   release should use a provider whose terms cover end-user display.
+- Illustrated campus map: © UC San Diego (Concept3D tiles); campus map styles
+  and places: UC San Diego's public ArcGIS campus map, on Esri World Topographic.
+  Check both are OK to show before a public release.

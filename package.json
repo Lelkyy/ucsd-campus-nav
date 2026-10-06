@@ -13,7 +13,8 @@
     "fetch:osm": "tsx scripts/build-graph.ts --refresh",
     "fetch:rooms": "tsx scripts/fetch-rooms.ts",
     "test": "vitest run",
-    "typecheck": "tsc -p packages/core && tsc -p packages/core/tsconfig.test.json && tsc -p apps/web && tsc -p scripts"
+    "typecheck": "tsc -p packages/core && tsc -p packages/core/tsconfig.test.json && tsc -p apps/web && tsc -p scripts",
+    "fetch:places": "tsx scripts/fetch-campus-places.ts"
   },
   "devDependencies": {
     "@types/geojson": "^7946.0.16",

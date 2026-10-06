@@ -29,7 +29,8 @@ import { BuildingSearch } from "./BuildingSearch.tsx";
 import { loadCampus, storage, type CampusData } from "./data.ts";
 import { Itinerary, formatDistance, formatTime } from "./Itinerary.tsx";
 import { PALETTE } from "./palette.ts";
-import { MapView, type DayOverlay, type RouteLine } from "./MapView.tsx";
+import { MapLayersMenu } from "./MapLayersMenu.tsx";
+import { MapView, type BaseMap, type CampusPlaces, type DayOverlay, type RouteLine } from "./MapView.tsx";
 import {
   BikeIcon,
   BusIcon,
@@ -39,7 +40,6 @@ import {
   HomeIcon,
   StarIcon,
   LocateIcon,
-  SatelliteIcon,
   StepFreeIcon,
   SwapIcon,
   WalkIcon,
@@ -111,7 +111,18 @@ export function App() {
 
   /** Phones: the panel is a bottom sheet that can be pulled up. */
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [showSatellite, setShowSatellite] = useState(false);
+  const [baseMap, setBaseMap] = useState<BaseMap>(() => storage.get<BaseMap>("campus-nav:base-map", "map"));
+  useEffect(() => storage.set("campus-nav:base-map", baseMap), [baseMap]);
+  const [placeCategories, setPlaceCategories] = useState<string[]>(() => storage.get<string[]>("campus-nav:place-categories", []));
+  useEffect(() => storage.set("campus-nav:place-categories", placeCategories), [placeCategories]);
+  // UCSD's places (restrooms, food, water...), fetched when first shown.
+  const [campusPlaces, setCampusPlaces] = useState<CampusPlaces | null>(null);
+  useEffect(() => {
+    fetch("/data/campus-places.json")
+      .then((r) => (r.ok ? (r.json() as Promise<CampusPlaces>) : null))
+      .then(setCampusPlaces)
+      .catch(() => setCampusPlaces(null));
+  }, []);
 
   /** Report tab: the spot tapped on the map, and the route the report is about (if any). */
   const [reportPin, setReportPin] = useState<LngLat | null>(null);
@@ -451,7 +462,14 @@ export function App() {
           showStops={!showingDay && routeStops.length > 0}
           from={from && !showingDay ? endpointPosition(from) : null}
           to={to && !showingDay ? endpointPosition(to) : null}
-          showSatellite={showSatellite}
+          baseMap={baseMap}
+          places={campusPlaces}
+          placeCategories={placeCategories}
+          onPlaceDirections={(p) => {
+            setTab("go");
+            setTo({ kind: "point", lngLat: p.lngLat, label: p.name });
+            setHint(null);
+          }}
           reportPin={tab === "report" ? reportPin : null}
           pickingSpot={tab === "report"}
           focus={focus}
@@ -467,13 +485,13 @@ export function App() {
       )}
 
       <div className="map-tools">
-        <button
-          className={`map-chip ${showSatellite ? "on" : ""}`}
-          aria-pressed={showSatellite}
-          onClick={() => setShowSatellite((v) => !v)}
-        >
-          <SatelliteIcon /> Satellite
-        </button>
+        <MapLayersMenu
+          baseMap={baseMap}
+          onBaseMap={setBaseMap}
+          places={campusPlaces}
+          categories={placeCategories}
+          onCategories={setPlaceCategories}
+        />
       </div>
 
       {destBuilding && destRoom && !showingDay && (

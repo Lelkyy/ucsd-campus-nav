@@ -205,6 +205,82 @@ button.link.danger { color: var(--danger); }
 }
 .map-chip.on { background: var(--accent); color: var(--accent-text); }
 
+/* Map style and places menu */
+.layers { position: relative; display: flex; flex-direction: column; align-items: flex-end; }
+.layers-count { min-width: 17px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-size: 11px; font-weight: 700; }
+.map-chip.on .layers-count { background: var(--accent-text); color: var(--accent); }
+.layers-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 272px;
+  max-width: calc(100vw - 24px);
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.layers-section { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.layers-base {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--muted);
+}
+.layers-base:hover:not(:disabled) { border-color: transparent; color: var(--text); }
+.layers-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  border: 2px solid var(--border);
+  background: #f4f8d6 center / cover no-repeat;
+}
+.layers-base.on { color: var(--text); }
+.layers-base.on .layers-thumb { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+/* One campus tile of each map as its thumbnail; the app's own map is vector, so a sketch of it. */
+.base-map .layers-thumb {
+  background-image:
+    linear-gradient(115deg, transparent 46%, #ffe39a 46% 54%, transparent 54%),
+    linear-gradient(20deg, transparent 60%, #c6e2a2 60%),
+    linear-gradient(#ddd5c0 0 0);
+  background-size: cover, cover, 34% 30%;
+  background-position: center, center, 30% 35%;
+  background-color: #f4f8d6;
+}
+.base-illustrated .layers-thumb { background-image: url("https://assets.concept3d.com/assets/1005/1005_Map_9/16/11425/39111"); }
+.base-campus .layers-thumb { background-image: url("https://services.arcgisonline.com/arcgis/rest/services/World_Topo_Map/MapServer/tile/16/26424/11425"); }
+.base-satellite .layers-thumb { background-image: url("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/16/26424/11425"); }
+.layers-head { display: flex; align-items: baseline; justify-content: space-between; padding-top: 8px; border-top: 1px solid var(--border); font-size: 13px; }
+.layers-places { display: flex; flex-wrap: wrap; gap: 6px; }
+.layers-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.layers-place.on { border-color: var(--cat); background: color-mix(in srgb, var(--cat) 14%, var(--surface)); color: var(--text); }
+.layers-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--cat); box-shadow: 0 0 0 1.5px var(--surface); }
+.layers-source { margin: 0; }
+.place-popup .maplibregl-popup-content { padding: 10px 12px; border-radius: 12px; background: var(--surface); color: var(--text); font: 13px var(--font); box-shadow: var(--shadow); }
+.place-popup .maplibregl-popup-content > div { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-right: 12px; }
+.place-popup .maplibregl-popup-tip { border-top-color: var(--surface); border-bottom-color: var(--surface); }
+.place-popup-meta { color: var(--muted); font-size: 12px; }
+.place-popup button.primary { margin-top: 4px; }
+
 /* ---------- Directions ---------- */
 .next-up {
   display: grid;
@@ -528,6 +604,8 @@ button.choice { display: flex; width: 100%; text-align: left; }
   .sheet-handle span { width: 36px; height: 4px; border-radius: 2px; background: var(--border); }
   .sheet-head { padding-top: 4px; }
   .map-tools { top: 12px; left: 12px; right: auto; align-items: flex-start; }
+  .layers { align-items: flex-start; }
+  .layers-menu { right: auto; left: 0; }
   .modes button { padding: 8px 2px 7px; }
 }
 

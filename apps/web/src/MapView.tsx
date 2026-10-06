@@ -5,10 +5,12 @@ import {
   Map as MlMap,
   Marker,
   NavigationControl,
+  Popup,
   ScaleControl,
   setWorkerUrl,
   type ExpressionSpecification,
   type GeoJSONSource,
+  type LayerSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { PALETTE } from "./palette.ts";
@@ -19,6 +21,28 @@ import { useEffect, useRef, useState } from "react";
 const BASE_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 const SATELLITE_TILES =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+/** UC San Diego's illustrated campus map (by Concept3D, the old maps.ucsd.edu); TMS rows. */
+const ILLUSTRATED_TILES = "https://assets.concept3d.com/assets/1005/1005_Map_9/{z}/{x}/{y}";
+/** Esri's topographic map, which the official ArcGIS campus map is drawn on. */
+const TOPO_TILES = "https://services.arcgisonline.com/arcgis/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}";
+/** UC San Diego's campus vector tiles, for its district names and campus boundary. */
+const UCSD_VECTOR_TILES = "https://tiles.arcgis.com/tiles/mXNwDpiENQiMIzRv/arcgis/rest/services/CampusMapVectorApril2/VectorTileServer/tile/{z}/{y}/{x}.pbf";
+
+/** The map underneath: the app's own, UCSD's illustrated one, the official campus map, or satellite. */
+export type BaseMap = "map" | "illustrated" | "campus" | "satellite";
+
+/** Places from UCSD's campus map (apps/web/public/data/campus-places.json). */
+export interface CampusPlaces {
+  categories: { id: string; label: string; color: string }[];
+  /** [lng, lat, category index, name, kind, building] */
+  points: [number, number, number, string, string, string][];
+}
+
+/** A place tapped on the map. */
+export interface PlacePick {
+  lngLat: LngLat;
+  name: string;
+}
 const CAMPUS_CENTER: LngLat = [-117.2376, 32.8801];
 /** Room around the campus data's bounding box: enough to see the shore and ocean to the west. */
 const CAMPUS_PADDING_DEG = 0.006;
@@ -54,7 +78,11 @@ export interface MapViewProps {
   showStops: boolean;
   from: LngLat | null;
   to: LngLat | null;
-  showSatellite: boolean;
+  baseMap: BaseMap;
+  /** UCSD's places, and the categories to show. */
+  places: CampusPlaces | null;
+  placeCategories: string[];
+  onPlaceDirections: (place: PlacePick) => void;
   /** A spot being reported (orange marker). */
   reportPin: LngLat | null;
   /** Your live position while navigating, and whether the map should follow it. */
@@ -80,6 +108,8 @@ export function MapView(props: MapViewProps) {
   const roomLabel = useRef<HTMLSpanElement | null>(null);
   const [ready, setReady] = useState(false);
   const lastTrip = useRef<string | null>(null);
+  const baseSymbols = useRef<string[]>([]);
+  const popup = useRef<Popup | null>(null);
 
   // Keep the latest callbacks without re-binding map listeners.
   const callbacks = useRef(props);
@@ -128,6 +158,32 @@ export function MapView(props: MapViewProps) {
         if (filter) map.setFilter(id, ["all", filter as ExpressionSpecification, notTransit]);
       }
       const firstSymbol = map.getStyle().layers.find((l) => l.type === "symbol")?.id;
+      // The base map's own labels and icons: hidden under maps that bring their own.
+      baseSymbols.current = map
+        .getStyle()
+        .layers.filter((l) => l.type === "symbol")
+        .map((l) => l.id);
+      map.addSource("illustrated", {
+        type: "raster",
+        tiles: [ILLUSTRATED_TILES],
+        scheme: "tms",
+        tileSize: 256,
+        minzoom: 13,
+        maxzoom: 20,
+        bounds: [-117.26, 32.855, -117.2, 32.895],
+        attribution: "Illustrated map © UC San Diego",
+      });
+      map.addLayer({ id: "illustrated", type: "raster", source: "illustrated", layout: { visibility: "none" } }, firstSymbol);
+      map.addSource("topo", {
+        type: "raster",
+        tiles: [TOPO_TILES],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: "Campus map © UC San Diego, Esri",
+      });
+      map.addLayer({ id: "topo", type: "raster", source: "topo", layout: { visibility: "none" } }, firstSymbol);
+      map.addSource("ucsd", { type: "vector", tiles: [UCSD_VECTOR_TILES], minzoom: 0, maxzoom: 16 });
+      for (const layer of UCSD_LAYERS) map.addLayer({ ...layer, layout: { ...layer.layout, visibility: "none" } } as LayerSpecification);
       map.addSource("satellite", {
         type: "raster",
         tiles: [SATELLITE_TILES],
@@ -140,9 +196,39 @@ export function MapView(props: MapViewProps) {
         firstSymbol,
       );
 
-      for (const id of ["route", "connectors", "stops", "doors", "day"]) {
+      for (const id of ["route", "connectors", "stops", "doors", "day", "places"]) {
         map.addSource(id, { type: "geojson", data: EMPTY });
       }
+      // UCSD's places, under everything of the app's; names once zoomed in.
+      map.addLayer({
+        id: "places",
+        type: "circle",
+        source: "places",
+        filter: ["boolean", false],
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 3.5, 17, 6, 19, 8],
+          "circle-color": ["get", "color"],
+          "circle-stroke-color": PALETTE.white,
+          "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 14, 1, 17, 2],
+        },
+      });
+      map.addLayer({
+        id: "place-labels",
+        type: "symbol",
+        source: "places",
+        minzoom: 17.5,
+        filter: ["boolean", false],
+        layout: {
+          "text-field": ["get", "name"],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 11,
+          "text-offset": [0, 0.9],
+          "text-anchor": "top",
+          "text-max-width": 8,
+          "text-optional": true,
+        },
+        paint: { "text-color": ["get", "color"], "text-halo-color": PALETTE.white, "text-halo-width": 1.5 },
+      });
       map.addLayer({
         id: "stops",
         type: "circle",
@@ -265,7 +351,31 @@ export function MapView(props: MapViewProps) {
       setReady(true);
     });
 
-    map.on("click", (e) => callbacks.current.onMapClick([e.lngLat.lng, e.lngLat.lat]));
+    map.on("click", (e) => {
+      // A place: what it is, and directions to it; anywhere else drops a pin as before.
+      const hit = map.getLayer("places")
+        ? map.queryRenderedFeatures([
+            [e.point.x - 6, e.point.y - 6],
+            [e.point.x + 6, e.point.y + 6],
+          ], { layers: ["places"] })[0]
+        : undefined;
+      if (hit && hit.geometry.type === "Point") {
+        const at = hit.geometry.coordinates as LngLat;
+        const { name, kind, building } = hit.properties as { name: string; kind: string; building: string };
+        popup.current?.remove();
+        popup.current = new Popup({ closeButton: true, maxWidth: "240px", className: "place-popup" })
+          .setLngLat(at)
+          .setDOMContent(placeCard(name, kind, building, () => {
+            popup.current?.remove();
+            callbacks.current.onPlaceDirections({ lngLat: at, name });
+          }))
+          .addTo(map);
+        return;
+      }
+      callbacks.current.onMapClick([e.lngLat.lng, e.lngLat.lat]);
+    });
+    map.on("mouseenter", "places", () => (map.getCanvas().style.cursor = "pointer"));
+    map.on("mouseleave", "places", () => (map.getCanvas().style.cursor = ""));
 
     return () => map.remove();
   }, []);
@@ -274,10 +384,45 @@ export function MapView(props: MapViewProps) {
     if (!ready) return;
     const map = mapRef.current!;
     const vis = (on: boolean) => (on ? "visible" : "none");
-    map.setLayoutProperty("satellite", "visibility", vis(props.showSatellite));
+    const base = props.baseMap;
+    map.setLayoutProperty("satellite", "visibility", vis(base === "satellite"));
+    map.setLayoutProperty("illustrated", "visibility", vis(base === "illustrated"));
+    map.setLayoutProperty("topo", "visibility", vis(base === "campus"));
+    for (const layer of UCSD_LAYERS) map.setLayoutProperty(layer.id, "visibility", vis(base === "campus"));
+    // The illustrated and campus maps have their own names; the base map's would double them.
+    const ownLabels = base === "illustrated" || base === "campus";
+    for (const id of baseSymbols.current) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis(!ownLabels));
+  }, [ready, props.baseMap]);
+
+  useEffect(() => {
+    if (!ready || !props.places) return;
+    const { categories, points } = props.places;
+    source(mapRef.current!, "places").setData({
+      type: "FeatureCollection",
+      features: points.map(([lng, lat, cat, name, kind, building]) => ({
+        type: "Feature",
+        properties: { cat: categories[cat].id, color: categories[cat].color, name, kind, building },
+        geometry: { type: "Point", coordinates: [lng, lat] },
+      })),
+    });
+  }, [ready, props.places]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const map = mapRef.current!;
+    const filter: ExpressionSpecification = ["in", ["get", "cat"], ["literal", props.placeCategories]];
+    map.setFilter("places", filter);
+    map.setFilter("place-labels", filter);
+    if (!props.placeCategories.length) popup.current?.remove();
+  }, [ready, props.placeCategories]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const map = mapRef.current!;
+    const vis = (on: boolean) => (on ? "visible" : "none");
     map.setLayoutProperty("stops", "visibility", vis(props.showStops));
     map.setLayoutProperty("stop-labels", "visibility", vis(props.showStops));
-  }, [ready, props.showSatellite, props.showStops]);
+  }, [ready, props.showStops]);
 
   useEffect(() => {
     if (!ready) return;
@@ -472,6 +617,85 @@ const BASE_TINTS: [RegExp, "background-color" | "fill-color" | "line-color" | "f
   [/^building$/, "fill-color", "#ddd5c0"],
   [/^building-3d$/, "fill-extrusion-color", "#ddd5c0"],
 ];
+
+/**
+ * From UCSD's campus vector style: the campus boundary and the district and
+ * neighborhood names, as on the official ArcGIS campus map (fonts swapped for
+ * ones the base map's font server has; names shown a little longer).
+ */
+const UCSD_LAYERS = [
+  {
+    id: "ucsd-boundary-glow",
+    type: "line",
+    source: "ucsd",
+    "source-layer": "UCSD Boundary Campus Map",
+    minzoom: 13,
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": "rgba(189,206,222,0.25)",
+      "line-width": { base: 1, stops: [[0, 2], [14, 5], [19, 8.3]] },
+      "line-offset": -2.1,
+      "line-translate": [0, 2],
+    },
+  },
+  {
+    id: "ucsd-boundary",
+    type: "line",
+    source: "ucsd",
+    "source-layer": "UCSD Boundary Campus Map",
+    minzoom: 13,
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": "rgba(75,117,166,0.73)",
+      "line-width": { base: 1, stops: [[0, 1], [14, 2], [19, 4]] },
+      "line-dasharray": [2, 2],
+      "line-offset": -2.1,
+    },
+  },
+  {
+    id: "ucsd-subdistricts",
+    type: "symbol",
+    source: "ucsd",
+    "source-layer": "UCSD Subdistricts/label",
+    minzoom: 14.5,
+    maxzoom: 17,
+    layout: { "text-field": "{_name}", "text-font": ["Noto Sans Bold"], "text-size": 13, "text-line-height": 0.9, "text-optional": true },
+    paint: { "text-color": "#4A6497", "text-halo-color": "rgba(255,255,255,0.8)", "text-halo-width": 2.5 },
+  },
+  {
+    id: "ucsd-districts",
+    type: "symbol",
+    source: "ucsd",
+    "source-layer": "UCSD Districts/label",
+    minzoom: 13,
+    maxzoom: 14.5,
+    layout: {
+      "text-field": "{_name}",
+      "text-font": ["Noto Sans Bold"],
+      "text-size": { base: 1, stops: [[13, 12], [14, 15.5]] },
+      "text-max-width": 10,
+      "text-line-height": 0.95,
+      "text-optional": true,
+    },
+    paint: { "text-color": "#014B75", "text-halo-color": "rgba(255,255,255,0.8)", "text-halo-width": 3 },
+  },
+] as const;
+
+/** The popup for a tapped place. */
+function placeCard(name: string, kind: string, building: string, onGo: () => void): HTMLElement {
+  const el = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = name;
+  const meta = document.createElement("span");
+  meta.className = "place-popup-meta";
+  meta.textContent = [kind === name ? "" : kind, building].filter(Boolean).join(" · ");
+  const go = document.createElement("button");
+  go.className = "primary small-btn";
+  go.textContent = "Directions here";
+  go.onclick = onGo;
+  el.append(title, meta, go);
+  return el;
+}
 
 function tintBaseMap(map: MlMap) {
   for (const layer of map.getStyle().layers) {

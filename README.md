@@ -40,6 +40,12 @@ the way, using the paths, stairs and bike paths students actually use.
   them takes and whether the gap is enough, and get directions to any class,
   from where you are or from the class before. Overlapping classes show as a
   conflict to choose from, and the day's walks are drawn on the map.
+- **Four maps to choose from:** the app's own, UC San Diego's illustrated
+  campus map, the official campus map (district names and campus boundary) or
+  satellite, with routes and paths drawn on top of each.
+- **Campus places:** show restrooms, food, water refill stations, study spots,
+  bike racks, parking and more from UC San Diego's campus map, and get
+  directions to any of them.
 - **Search that understands campus:** "WLH 2001", "wlh2001", "CSE 11" (each
   section separately), "giesel" (typos and missing spaces are fine), building
   codes, old names and the names students use.
