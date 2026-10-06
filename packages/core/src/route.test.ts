@@ -352,6 +352,14 @@ describe("real campus data", () => {
     expect(roads / graph.edgeCount).toBeLessThan(0.1);
   });
 
+  it("walks the sidewalks along roads", () => {
+    const sidewalks = Array.from(graph.edgeKind).filter((k) => k === EdgeKind.Sidewalk).length;
+    expect(sidewalks).toBeGreaterThan(1000);
+    // Walked like a footpath, ridden like a road.
+    expect(PROFILES.walk.speed[EdgeKind.Sidewalk]).toBe(PROFILES.walk.speed[EdgeKind.Path]);
+    expect(PROFILES.bike.speed[EdgeKind.Sidewalk]).toBe(PROFILES.bike.speed[EdgeKind.Road]);
+  });
+
   const roomsPath = new URL("../../../data/rooms.json", import.meta.url);
   it.runIf(existsSync(roomsPath))("accounts for every building code classes meet in", () => {
     const { rooms } = JSON.parse(readFileSync(roomsPath, "utf8")) as { rooms: Record<string, string[]> };

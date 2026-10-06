@@ -108,6 +108,23 @@ const ROAD_HIGHWAYS = new Set([
   "tertiary", "tertiary_link", "secondary", "secondary_link", "primary", "primary_link",
 ]);
 
+/**
+ * Roads with no sidewalk tag that still almost always have one around here: residential
+ * streets and through roads. Service roads (parking aisles, driveways) don't count.
+ */
+const LIKELY_SIDEWALK = new Set([
+  "residential", "living_street", "unclassified", "tertiary", "tertiary_link", "secondary", "secondary_link",
+]);
+
+/** Whether walking along this road means a sidewalk on it (not one mapped as its own footway). */
+function hasSidewalk(tags: Record<string, string>): boolean {
+  const sides = [tags.sidewalk, tags["sidewalk:both"], tags["sidewalk:left"], tags["sidewalk:right"]].filter(Boolean);
+  if (sides.some((v) => ["both", "left", "right", "yes"].includes(v))) return true;
+  // "separate": drawn as its own footway, already in the graph; "no"/"none": nowhere to walk.
+  if (sides.length) return false;
+  return tags.highway === "living_street" || LIKELY_SIDEWALK.has(tags.highway);
+}
+
 interface OsmNode { type: "node"; id: number; lat: number; lon: number; tags?: Record<string, string> }
 interface OsmWay {
   type: "way";
@@ -667,13 +684,14 @@ async function main() {
 
   const mainSize = comps.size[mainComponent];
   const roadEdges = finalEdges.filter((e) => e[2] === EdgeKind.Road).length;
+  const sidewalkEdges = finalEdges.filter((e) => e[2] === EdgeKind.Sidewalk).length;
   const bikeOnly = finalEdges.filter((e) => e[2] === EdgeKind.BikeOnly).length;
   const shared = finalEdges.filter((e) => e[2] === EdgeKind.Shared || e[2] === EdgeKind.Bike).length;
   const roomCount = Object.values(roomsData?.rooms ?? {}).reduce((sum, r) => sum + r.length, 0);
   const count = (a: Building["access"]) => buildings.filter((b) => b.access === a).length;
   console.log(
     [
-      `nodes ${finalCoords.length}, edges ${finalEdges.length} (walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
+      `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
       `walking network: ${new Set(Array.from(comps.id).filter((_, i) => walkNode[i])).size} pieces (main: ${mainSize} nodes); riding network main: ${bikeComps.size[mainBikeComponent]} nodes`,
       `blocked ways ${blockedCount}, custom paths ${customCount}`,
       process.env.VERBOSE ? `matched by shape, names differ: ${differentNames.join("; ")}` : "",
@@ -897,7 +915,7 @@ function edgeKind(tags: Record<string, string>): { kind: EdgeKind; bikeOk: boole
     const shared = yes(tags.bicycle) || (hw === "path" && !noBike);
     return { kind: shared ? EdgeKind.Shared : EdgeKind.Path, bikeOk: shared };
   }
-  if (ROAD_HIGHWAYS.has(hw)) return { kind: EdgeKind.Road, bikeOk: !noBike };
+  if (ROAD_HIGHWAYS.has(hw)) return { kind: hasSidewalk(tags) ? EdgeKind.Sidewalk : EdgeKind.Road, bikeOk: !noBike };
   return null;
 }
 

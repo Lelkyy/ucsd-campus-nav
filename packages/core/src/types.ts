@@ -15,6 +15,8 @@ export const EdgeKind = {
   BikeOnly: 5,
   /** path where riding is allowed but not designated (highway=path, bicycle=yes) */
   Shared: 6,
+  /** a road with a sidewalk on it (tagged, or a residential or through road with no tag saying otherwise): walk on the sidewalk, ride on the road */
+  Sidewalk: 7,
 } as const;
 export type EdgeKind = (typeof EdgeKind)[keyof typeof EdgeKind];
 

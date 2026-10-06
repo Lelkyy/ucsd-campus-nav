@@ -38,12 +38,13 @@ export const PROFILES = {
       [EdgeKind.Shared]: WALK,
       [EdgeKind.Bike]: WALK,
       [EdgeKind.Road]: WALK,
+      [EdgeKind.Sidewalk]: WALK,
       // Climbing stairs is slower than walking the same distance on the flat.
       [EdgeKind.Steps]: WALK / 1.4,
       [EdgeKind.BikeOnly]: 0,
     },
-    // Prefer footpaths; connector roads only when nothing else goes there.
-    prefer: { [EdgeKind.Bike]: 1.1, [EdgeKind.Road]: 1.5 },
+    // Prefer footpaths, then sidewalks along roads; connector roads only when nothing else goes there.
+    prefer: { [EdgeKind.Bike]: 1.1, [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Road]: 1.5 },
   },
   accessible: {
     id: "accessible",
@@ -55,10 +56,11 @@ export const PROFILES = {
       [EdgeKind.Shared]: WALK,
       [EdgeKind.Bike]: WALK,
       [EdgeKind.Road]: WALK,
+      [EdgeKind.Sidewalk]: WALK,
       [EdgeKind.Steps]: 0,
       [EdgeKind.BikeOnly]: 0,
     },
-    prefer: { [EdgeKind.Bike]: 1.1, [EdgeKind.Road]: 1.5 },
+    prefer: { [EdgeKind.Bike]: 1.1, [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Road]: 1.5 },
   },
   bike: {
     id: "bike",
@@ -67,6 +69,7 @@ export const PROFILES = {
     speed: {
       [EdgeKind.Bike]: RIDE,
       [EdgeKind.Road]: RIDE,
+      [EdgeKind.Sidewalk]: RIDE,
       [EdgeKind.BikeOnly]: RIDE,
       [EdgeKind.Shared]: RIDE_SHARED,
       // Footpaths and hand-traced paths: get off and walk the bike.
@@ -76,7 +79,7 @@ export const PROFILES = {
       [EdgeKind.Steps]: 0.4,
     },
     // Bike paths first, then quiet shared paths, then roads.
-    prefer: { [EdgeKind.Road]: 1.15, [EdgeKind.BikeOnly]: 1.2, [EdgeKind.Shared]: 1.05, [EdgeKind.Steps]: 3 },
+    prefer: { [EdgeKind.Road]: 1.15, [EdgeKind.Sidewalk]: 1.15, [EdgeKind.BikeOnly]: 1.2, [EdgeKind.Shared]: 1.05, [EdgeKind.Steps]: 3 },
   },
 } satisfies Record<string, Profile>;
 

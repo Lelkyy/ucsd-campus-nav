@@ -43,10 +43,17 @@ data/private/* (TSS) ──────┘                               ▼
   no server. The schedule is saved in `localStorage`.
 - **`scripts/build-graph.ts`** builds the map data:
   - **Edge kinds:** footpaths, stairs, bike paths, shared paths (bikes allowed
-    but not designated), connector roads, and bike-only roads.
-  - **Walking** uses roads only where they're the sole link to a campus building
-    or shuttle stop (~6% of road segments). Path pieces that lead to neither
-    are dropped.
+    but not designated), roads with sidewalks, connector roads, and bike-only
+    roads.
+  - **Roads with sidewalks** (`hasSidewalk`) are walked like footpaths
+    (a 5% preference for paths) and ridden like roads: OSM `sidewalk`,
+    `sidewalk:both|left|right` = both/left/right/yes, or, with no sidewalk tag
+    at all, residential, living, unclassified, tertiary and secondary roads,
+    which around here almost always have one. `separate` (the sidewalk is its
+    own footway, already in the graph), `no` and untagged service roads
+    (parking aisles, driveways) don't count.
+  - **Other roads** are walked only where they're the sole link to a campus
+    building or shuttle stop. Path pieces that lead to neither are dropped.
   - **Riding** can also use every other road in the area that bikes are allowed on.
   - Only buildings inside the OSM campus boundary are included. Each building
     gets route targets: mapped entrances when OSM has them, otherwise path
