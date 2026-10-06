@@ -5,7 +5,6 @@ import type { TransitNetwork } from "./transit.ts";
 import type { LngLat } from "./types.ts";
 
 /** Like Google Maps' route options. */
-export type TransitPreference = "best" | "fewer-transfers" | "less-walking";
 
 export interface Timing {
   departAt?: Date;
@@ -46,14 +45,14 @@ const ALTERNATE_TIMES = 2;
 /**
  * Transit choices for a trip, Google-Maps style: several routes that trade off
  * arrival time, transfers and walking (dominated ones dropped), walking itself
- * when it's competitive, and the next departures of the best route, sorted by
- * the chosen preference.
+ * when it's competitive, and the next departures of the best route: the
+ * shortest trips first, at most `max` (3).
  */
 export function transitOptions(
   graph: CampusGraph,
   from: Endpoint,
   to: Endpoint,
-  opts: { transit: TransitNetwork; timing: Timing; preference?: TransitPreference; stepFree?: boolean; max?: number },
+  opts: { transit: TransitNetwork; timing: Timing; stepFree?: boolean; max?: number },
 ): TransitOptionsResult {
   const profile = opts.stepFree ? PROFILES.accessible : PROFILES.walk;
   const trip = resolveTrip(graph, from, to, profile);
@@ -105,9 +104,8 @@ export function transitOptions(
   const listedLines = new Set(found.filter((o) => !o.alternateTime).map(lines));
   for (const o of found) if (o.alternateTime && !listedLines.has(lines(o))) o.alternateTime = false;
   const main = paretoFilter(found.filter((o) => !o.alternateTime && keep(o)), !!arriveBy);
-  const sorted = sortOptions(main, opts.preference ?? "best", !!arriveBy);
   const later = found.filter((o) => o.alternateTime);
-  return { options: [...sorted, ...later].slice(0, opts.max ?? 5), connectors: trip.connectors };
+  return { options: byDuration([...main, ...later], !!arriveBy).slice(0, opts.max ?? 3), connectors: trip.connectors };
 }
 
 function describe(route: Route, alternateTime: boolean): TransitOption {
@@ -152,16 +150,11 @@ function paretoFilter(options: TransitOption[], arriveBy: boolean): TransitOptio
   );
 }
 
-function sortOptions(options: TransitOption[], pref: TransitPreference, arriveBy: boolean): TransitOption[] {
-  // Leaving now: earliest arrival is best. Arriving by a time: latest departure is best.
+/** Shortest trip first (door to door, waits included); on a tie, the one that gets you there first. */
+function byDuration(options: TransitOption[], arriveBy: boolean): TransitOption[] {
+  // Leaving now: earliest arrival. Arriving by a time: latest departure.
   const time = (o: TransitOption) => (arriveBy ? -o.route.leaveAt.getTime() : o.route.arriveAt.getTime());
-  const byTime = (a: TransitOption, b: TransitOption) => time(a) - time(b);
-  const sorters: Record<TransitPreference, (a: TransitOption, b: TransitOption) => number> = {
-    best: (a, b) => byTime(a, b) || a.boardings - b.boardings || a.walkMeters - b.walkMeters,
-    "fewer-transfers": (a, b) => a.boardings - b.boardings || byTime(a, b),
-    "less-walking": (a, b) => a.walkMeters - b.walkMeters || byTime(a, b),
-  };
-  return [...options].sort(sorters[pref]);
+  return [...options].sort((a, b) => a.route.minutes - b.route.minutes || time(a) - time(b) || a.boardings - b.boardings);
 }
 
 /** How often a ride's line leaves that stop around that time ("every 12 min"), if it's regular. */

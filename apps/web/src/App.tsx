@@ -8,7 +8,6 @@ import {
   routeLabel,
   transitOptions,
   tripFare,
-  type TransitPreference,
   insideHints,
   endpointLabel,
   endpointPosition,
@@ -90,8 +89,7 @@ export function App() {
   const arriveBy = timing.kind === "arrive" ? { at: timing.at, label: timing.label } : null;
   const departAt = timing.kind === "depart" ? timing.at : undefined;
   const setArriveBy = (a: { at: Date; label?: string } | null) => setTiming(a ? { kind: "arrive", ...a } : { kind: "now" });
-  /** Transit choices: preference, step-free, and which option is selected. */
-  const [transitPref, setTransitPref] = useState<TransitPreference>(() => storage.get("campus-nav:transit-pref", "best"));
+  /** Transit choices: step-free, and which option is selected. */
   const [transitStepFree, setTransitStepFree] = useState<boolean>(() => storage.get("campus-nav:transit-stepfree", false));
   const [selectedOption, setSelectedOption] = useState(0);
   const [clickTarget, setClickTarget] = useState<"from" | "to">("from");
@@ -167,7 +165,6 @@ export function App() {
   useEffect(() => storage.set("campus-nav:mode", mode), [mode]);
   useEffect(() => storage.set("campus-nav:upass", upass), [upass]);
 
-  useEffect(() => storage.set("campus-nav:transit-pref", transitPref), [transitPref]);
   useEffect(() => storage.set("campus-nav:transit-stepfree", transitStepFree), [transitStepFree]);
 
   const planFor = useCallback(
@@ -188,15 +185,15 @@ export function App() {
   const transitFor = useCallback(
     (a: Endpoint, b: Endpoint, t: { arriveBy?: Date; departAt?: Date }) =>
       data
-        ? transitOptions(data.graph, a, b, { transit: data.transit, timing: t, preference: transitPref, stepFree: transitStepFree })
+        ? transitOptions(data.graph, a, b, { transit: data.transit, timing: t, stepFree: transitStepFree })
         : null,
-    [data, transitPref, transitStepFree],
+    [data, transitStepFree],
   );
   const transitResult = useMemo(
     () => (from && to ? transitFor(from, to, { arriveBy: arriveBy?.at, departAt }) : null),
     [transitFor, from, to, arriveBy?.at, departAt],
   );
-  // A new trip, time or preference starts from the top option.
+  // A new trip, time or setting starts from the top option.
   useEffect(() => setSelectedOption(0), [transitResult]);
   const transitOpts = transitResult?.options ?? [];
   const bestTransit = transitOpts.find((o) => !o.walkOnly) ?? null;
@@ -711,8 +708,6 @@ export function App() {
                   options={transitOpts}
                   selected={selectedOption}
                   onSelect={setSelectedOption}
-                  preference={transitPref}
-                  onPreference={setTransitPref}
                   stepFree={transitStepFree}
                   onStepFree={setTransitStepFree}
                   transit={data.transit}

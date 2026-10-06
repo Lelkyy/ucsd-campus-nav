@@ -6,23 +6,14 @@ import {
   type FeedFare,
   type TransitNetwork,
   type TransitOption,
-  type TransitPreference,
 } from "@campus/core";
 import { formatDistance, formatTime } from "./Itinerary.tsx";
 import { BusIcon, TrolleyIcon, WalkIcon } from "./Icons.tsx";
-
-const PREFS: { id: TransitPreference; label: string }[] = [
-  { id: "best", label: "Best route" },
-  { id: "fewer-transfers", label: "Fewer transfers" },
-  { id: "less-walking", label: "Less walking" },
-];
 
 interface Props {
   options: TransitOption[];
   selected: number;
   onSelect: (i: number) => void;
-  preference: TransitPreference;
-  onPreference: (p: TransitPreference) => void;
   stepFree: boolean;
   onStepFree: (v: boolean) => void;
   transit: TransitNetwork;
@@ -31,25 +22,12 @@ interface Props {
   arriving: boolean;
 }
 
-/** Google-Maps-style list of transit choices for the trip. */
+/** Google-Maps-style list of transit choices for the trip: the three shortest. */
 export function TransitPanel(p: Props) {
   const now = Date.now();
   return (
     <section className="transit" aria-label="Transit options">
       <div className="transit-prefs">
-        <div className="segmented small-seg" role="radiogroup" aria-label="Route preference">
-          {PREFS.map((pref) => (
-            <button
-              key={pref.id}
-              role="radio"
-              aria-checked={p.preference === pref.id}
-              className={p.preference === pref.id ? "on" : ""}
-              onClick={() => p.onPreference(pref.id)}
-            >
-              {pref.label}
-            </button>
-          ))}
-        </div>
         <label className="toggle small">
           <input type="checkbox" checked={p.stepFree} onChange={(e) => p.onStepFree(e.target.checked)} />
           Wheelchair accessible

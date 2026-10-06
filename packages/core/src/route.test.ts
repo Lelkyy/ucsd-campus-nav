@@ -238,7 +238,7 @@ describe("bus mode: minimise walking", () => {
     expect(checkBusRoute(walkR, walkR).ok).toBe(false);
   });
 
-  it("lists walking and transit as options, ordered by the chosen preference", () => {
+  it("lists walking and transit as options, shortest trip first", () => {
     const building = (node: number, id: string): Building => ({
       id,
       name: id,
@@ -250,12 +250,13 @@ describe("bus mode: minimise walking", () => {
     });
     const from = { kind: "building" as const, building: building(0, "A") };
     const to = { kind: "building" as const, building: building(1, "B") };
-    // Leaving 10:00: walking (~14 min) arrives first; the 10:15 bus walks less.
-    const best = transitOptions(g, from, to, { transit, timing: { departAt: at(10) } }).options;
-    expect(best.map((o) => o.walkOnly)).toEqual([true, false]);
-    const lessWalking = transitOptions(g, from, to, { transit, timing: { departAt: at(10) }, preference: "less-walking" }).options;
-    expect(lessWalking[0].walkOnly).toBe(false);
-    expect(lessWalking[0].boardings).toBe(1);
+    // Leaving 10:00: walking takes ~14 min; the 10:15 bus is the shorter trip (leave later, ride 5 min).
+    const options = transitOptions(g, from, to, { transit, timing: { departAt: at(10) } }).options;
+    expect(options.map((o) => o.walkOnly)).toEqual([false, true]);
+    expect(options[0].route.minutes).toBeLessThan(options[1].route.minutes);
+    expect(options[0].boardings).toBe(1);
+    // Never more than three.
+    expect(transitOptions(g, from, to, { transit, timing: { departAt: at(10) }, max: 1 }).options).toHaveLength(1);
   });
 
   it("merges a loop that continues as its next run into one ride", () => {

@@ -291,8 +291,9 @@ Transit works like Google Maps' transit tab (`transitOptions.ts`):
 - Walking is one of the options when it's competitive (judged by arrival time,
   since a short ride can mean a long wait).
 - Options another option beats on time, transfers and walking all at once are
-  dropped; the rest are sorted by the preference: Best route (arrival, then
-  transfers, then walking), Fewer transfers, or Less walking. Up to 5 are shown.
+  dropped; the rest, later departures included, are sorted by trip length
+  (`route.minutes`, door to door with waits; ties go to the earlier arrival, or
+  the later departure when arriving by a time). The first 3 are shown.
 - Each card shows departure/arrival, lines, walking minutes, transfers, how
   often the first line runs ("every 15 min"), the fare and "Leave in N min".
 - Leave now / Depart at / Arrive by applies to every mode; routing to a class

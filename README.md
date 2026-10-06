@@ -18,10 +18,10 @@ the way, using the paths, stairs and bike paths students actually use.
 - **Four ways to get there:** Walk, No stairs (step-free), Bike (bike paths
   first, roads where needed, walking your bike only where riding isn't allowed),
   and Transit: campus shuttles, MTS buses and the Blue Line trolley on their
-  real timetables. Like Google Maps, Transit lists several options (with
-  times, lines, walking, transfers, "every N min", fare, free with the UCSD
-  U-Pass), sorted by Best route, Fewer transfers or Less walking, with Leave
-  now / Depart at / Arrive by and a wheelchair-accessible option.
+  real timetables. Like Google Maps, Transit lists up to three options, the
+  shortest trip first (with times, lines, walking, transfers, "every N min",
+  fare, free with the UCSD U-Pass), with Leave now / Depart at / Arrive by and
+  a wheelchair-accessible option.
 - **Your schedule:** add a course from the Fall 2026 schedule by picking a
   lecture, then one of its discussions or labs (each option says what it would
   overlap); midterms and the final come with it. Tap any class for directions,
