@@ -193,6 +193,13 @@ as permission is given; it never asks by itself (the locate buttons do). The
 position moves only after ~10 m, so GPS jitter doesn't re-plan everything that
 starts from it.
 
+You're drawn as one marker, a dot with a cone for the way you face (MapLibre's
+own locate dot is off). The cone follows the compass when the phone has one
+(`deviceorientationabsolute`, or iOS's `webkitCompassHeading` after the locate
+tap asks), else the way you're moving (GPS heading), else the way the route
+sets off. When the trip starts from "My location", the dot stands in for the
+start pin, and the start follows you as you move, without re-framing the map.
+
 ## Map styles and places
 
 The **Map** button picks one of two campus maps (kept in `localStorage`,

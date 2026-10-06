@@ -83,7 +83,11 @@ export interface MapViewProps {
   onPlaceDirections: (place: PlacePick) => void;
   /** A spot being reported (orange marker). */
   reportPin: LngLat | null;
-  /** Your live position while navigating, and whether the map should follow it. */
+  /** The trip starts from where you are: your dot stands in for the start pin. */
+  fromIsMe?: boolean;
+  /** Which way you face or move (degrees from north), for the cone on your dot. */
+  heading?: number | null;
+  /** Your position (live while navigating), and whether the map should follow it. */
   userPos: LngLat | null;
   follow: boolean;
   /** Doors of the destination building; `used` is the one the route ends at. */
@@ -129,6 +133,9 @@ export function MapView(props: MapViewProps) {
     const geolocate = new GeolocateControl({
       positionOptions: { enableHighAccuracy: true },
       trackUserLocation: true,
+      // The app draws you itself (one dot, with the way you face), not a second dot from here.
+      showUserLocation: false,
+      showAccuracyCircle: false,
     });
     map.addControl(geolocate, "top-right");
     geolocate.on("geolocate", (pos) => callbacks.current.onLocate([pos.coords.longitude, pos.coords.latitude]));
@@ -138,7 +145,7 @@ export function MapView(props: MapViewProps) {
       from: new Marker({ color: PALETTE.sageDeep }),
       to: new Marker({ color: PALETTE.rose }),
       report: new Marker({ color: PALETTE.clay }),
-      user: new Marker({ element: dotElement("user-dot") }),
+      user: new Marker({ element: viewpointElement(), rotationAlignment: "map", pitchAlignment: "map" }),
       room: new Marker({ element: roomElement(roomLabel), anchor: "bottom" }),
     };
 
@@ -514,7 +521,8 @@ export function MapView(props: MapViewProps) {
       features: props.connectors.map((c) => lineFeature(c)),
     });
     // Only re-frame when the trip changes, not on every re-render.
-    const tripKey = JSON.stringify([callbacks.current.from, callbacks.current.to]);
+    // A start that follows you doesn't count as a new trip.
+    const tripKey = JSON.stringify([callbacks.current.fromIsMe ? "me" : callbacks.current.from, callbacks.current.to]);
     const all = lines.flatMap((l) => l.coordinates);
     if (all.length > 1 && tripKey !== lastTrip.current) {
       lastTrip.current = tripKey;
@@ -530,7 +538,8 @@ export function MapView(props: MapViewProps) {
     const m = markers.current;
     if (!map || !m) return;
     for (const [marker, pos] of [
-      [m.from, props.from],
+      // Your dot stands in for the start when the trip starts from you.
+      [m.from, props.fromIsMe && props.userPos ? null : props.from],
       [m.to, props.to],
       [m.report, props.reportPin],
       [m.user, props.userPos],
@@ -540,7 +549,16 @@ export function MapView(props: MapViewProps) {
       else marker.remove();
     }
     if (roomLabel.current) roomLabel.current.textContent = props.room?.label ?? "";
-  }, [props.from, props.to, props.reportPin, props.userPos, props.room]);
+  }, [props.from, props.fromIsMe, props.to, props.reportPin, props.userPos, props.room]);
+
+  // The cone on your dot: shown when we know which way you face.
+  useEffect(() => {
+    const m = markers.current;
+    if (!m) return;
+    const known = props.heading !== null && props.heading !== undefined;
+    m.user.getElement().classList.toggle("has-heading", known);
+    m.user.setRotation(known ? props.heading! : 0);
+  }, [props.heading]);
 
   // Navigation: keep your position in view.
   useEffect(() => {
@@ -607,9 +625,15 @@ function fitPadding() {
   return { top: 70, right: 40, bottom: Math.round(window.innerHeight * 0.5), left: 40 };
 }
 
-function dotElement(className: string): HTMLElement {
+/** Your position: a dot with a cone for the way you face (shown once a heading is known). */
+function viewpointElement(): HTMLElement {
   const el = document.createElement("div");
-  el.className = className;
+  el.className = "viewpoint";
+  const cone = document.createElement("div");
+  cone.className = "viewpoint-cone";
+  const dot = document.createElement("div");
+  dot.className = "user-dot";
+  el.append(cone, dot);
   return el;
 }
 

@@ -712,7 +712,19 @@ button.start { width: 100%; padding: 11px; font-size: 15px; border-radius: 999px
 .step-icon { display: grid; place-items: center; color: var(--muted); }
 .steps li.current .step-icon { color: var(--accent); }
 
+/* You: a dot, with a cone for the way you face (the marker rotates it; up is the heading). */
+.viewpoint { position: relative; width: 72px; height: 72px; display: grid; place-items: center; pointer-events: none; }
+.viewpoint-cone {
+  position: absolute;
+  inset: 0;
+  display: none;
+  background: radial-gradient(circle at 50% 50%, rgb(47 90 46 / 0.45) 0, rgb(47 90 46 / 0.22) 45%, rgb(47 90 46 / 0) 70%);
+  /* A ~70° wedge opening upward from the centre. */
+  clip-path: polygon(50% 50%, 14% 0, 86% 0);
+}
+.viewpoint.has-heading .viewpoint-cone { display: block; }
 .user-dot {
+  position: relative;
   width: 18px;
   height: 18px;
   border-radius: 50%;

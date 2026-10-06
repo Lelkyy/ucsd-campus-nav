@@ -1,5 +1,6 @@
 import {
   CampusSearch,
+  bearing,
   haversine,
   MODES,
   buildSteps,
@@ -106,6 +107,22 @@ export function App() {
     (p: LngLat) => setMyLocationRaw((cur) => (cur && haversine(cur[0], cur[1], p[0], p[1]) < 10 ? cur : p)),
     [],
   );
+  /** Which way you face (compass) or move (GPS), for the cone on your dot. */
+  const [compassHeading, setCompassHeading] = useState<number | null>(null);
+  const [gpsHeading, setGpsHeading] = useState<number | null>(null);
+  useEffect(() => {
+    const onTurn = (e: DeviceOrientationEvent & { webkitCompassHeading?: number }) => {
+      // iOS reports the compass heading directly; elsewhere an absolute alpha counts anticlockwise.
+      const h = e.webkitCompassHeading ?? (e.absolute && e.alpha !== null ? 360 - e.alpha : null);
+      if (h === null || h === undefined || Number.isNaN(h)) return;
+      setCompassHeading((cur) => (cur !== null && Math.abs(((h - cur + 540) % 360) - 180) < 4 ? cur : h));
+    };
+    const absolute = "ondeviceorientationabsolute" in window;
+    const type = absolute ? "deviceorientationabsolute" : "deviceorientation";
+    window.addEventListener(type, onTurn as EventListener);
+    return () => window.removeEventListener(type, onTurn as EventListener);
+  }, []);
+
   // Where you are, on the map whenever the browser already allows it (never asks by itself:
   // the locate buttons do that). Follows you, and starts as soon as permission is given.
   useEffect(() => {
@@ -115,7 +132,12 @@ export function App() {
     const follow = (on: boolean) => {
       if (on && watch === null) {
         watch = navigator.geolocation.watchPosition(
-          (pos) => setMyLocation([pos.coords.longitude, pos.coords.latitude]),
+          (pos) => {
+            setMyLocation([pos.coords.longitude, pos.coords.latitude]);
+            // The direction you're moving, while you're moving.
+            const h = pos.coords.heading;
+            setGpsHeading(h !== null && !Number.isNaN(h) && (pos.coords.speed ?? 0) > 0.5 ? h : null);
+          },
           () => {},
           { enableHighAccuracy: true, maximumAge: 15_000 },
         );
@@ -394,6 +416,9 @@ export function App() {
 
   const locate = () => {
     if (!navigator.geolocation) return setHint("Location isn't available in this browser.");
+    // iOS asks separately for the compass, and only from a tap.
+    const orientation = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
+    orientation.requestPermission?.().catch(() => {});
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -410,6 +435,21 @@ export function App() {
       { enableHighAccuracy: true, timeout: 10_000 },
     );
   };
+
+  /** The trip starts from where you are: the start follows you, and shows as your dot. */
+  const fromIsMe = from?.kind === "point" && from.label === "My location";
+  useEffect(() => {
+    if (!fromIsMe || navigating || !myLocation || from?.kind !== "point") return;
+    if (from.lngLat[0] !== myLocation[0] || from.lngLat[1] !== myLocation[1]) setFromRaw({ ...from, lngLat: myLocation });
+  }, [myLocation, fromIsMe, navigating]);
+  // The cone: your compass, else the way you're moving, else the way the route sets off.
+  const routeBearing = useMemo(() => {
+    const c = fromIsMe ? route?.coordinates : undefined;
+    if (!c || c.length < 2) return null;
+    const far = c.find((p) => haversine(c[0][0], c[0][1], p[0], p[1]) > 15) ?? c[c.length - 1];
+    return bearing(c[0], far);
+  }, [route, fromIsMe]);
+  const heading = compassHeading ?? gpsHeading ?? routeBearing;
 
   /** Whether a destination is where your saved home is. */
   const isHome = (e: Endpoint) => {
@@ -527,6 +567,8 @@ export function App() {
           stops={showingDay ? [] : routeStops}
           showStops={!showingDay && routeStops.length > 0}
           from={from && !showingDay ? endpointPosition(from) : null}
+          fromIsMe={fromIsMe && !showingDay}
+          heading={heading}
           to={to && !showingDay ? endpointPosition(to) : null}
           baseMap={baseMap}
           places={campusPlaces}
