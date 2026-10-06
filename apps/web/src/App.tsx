@@ -417,24 +417,37 @@ export function App() {
   const locate = () => {
     if (!navigator.geolocation) return setHint("Location isn't available in this browser.");
     // iOS asks separately for the compass, and only from a tap.
-    const orientation = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
-    orientation.requestPermission?.().catch(() => {});
-    setLocating(true);
+    const orientation = (window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<string> } }).DeviceOrientationEvent;
+    orientation?.requestPermission?.().catch(() => {});
+    const startHere = (p: LngLat) => {
+      setFrom({ kind: "point", lngLat: p, label: "My location" });
+      setClickTarget("to");
+      setHint(null);
+    };
+    // Where we already know you are (the app follows you when allowed): use it right away.
+    if (myLocation) startHere(myLocation);
+    else setLocating(true);
+    const got = (pos: GeolocationPosition) => {
+      const p: LngLat = [pos.coords.longitude, pos.coords.latitude];
+      setMyLocation(p);
+      if (!myLocation) startHere(p);
+      setLocating(false);
+    };
+    const failed = (err: GeolocationPositionError) => {
+      setLocating(false);
+      if (!myLocation) setHint(`Couldn't get your location: ${err.message}`);
+    };
+    // A precise fix, or (laptops are often slow or unable to give one) any recent one.
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const p: LngLat = [pos.coords.longitude, pos.coords.latitude];
-        setMyLocation(p);
-        setFrom({ kind: "point", lngLat: p, label: "My location" });
-        setClickTarget("to");
-        setLocating(false);
-      },
-      (err) => {
-        setHint(`Couldn't get your location: ${err.message}`);
-        setLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 10_000 },
+      got,
+      (err) =>
+        err.code === err.PERMISSION_DENIED
+          ? failed(err)
+          : navigator.geolocation.getCurrentPosition(got, failed, { enableHighAccuracy: false, maximumAge: 120_000, timeout: 15_000 }),
+      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 8_000 },
     );
   };
+
 
   /** The trip starts from where you are: the start follows you, and shows as your dot. */
   const fromIsMe = from?.kind === "point" && from.label === "My location";
