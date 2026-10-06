@@ -40,7 +40,8 @@ export async function loadCampus(bust = false): Promise<CampusData> {
   ]);
   const graph = new CampusGraph(graphData);
   const buildingByCode = new Map<string, Building>();
-  for (const b of buildings) for (const a of b.aliases) if (/^[A-Z0-9-]{2,6}$/.test(a)) buildingByCode.set(a, b);
+  // First one wins, as in search.
+  for (const b of buildings) for (const a of b.aliases) if (/^[A-Z0-9-]{2,6}$/.test(a) && !buildingByCode.has(a)) buildingByCode.set(a, b);
   // The current term's rooms come with the (private) sections file, not buildings.json.
   for (const course of sections?.courses ?? []) {
     for (const [, , , , , , , code, room] of course.meetings) {

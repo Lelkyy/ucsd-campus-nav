@@ -55,7 +55,7 @@ const FARES_PATH = join(ROOT, "data/fares.json");
 /** Current-term schedule exported from TSS (login-only, so kept out of git). */
 const PRIVATE_DIR = join(ROOT, "data/private");
 
-/** data/building-codes.json: schedule building codes -> OSM building names ("Prefix*" matches several). */
+/** data/building-codes.json: schedule building codes -> building names ("Prefix*" must still match just one). */
 interface CodeFile {
   codes: Record<string, string>;
   /** Codes that appear in the schedule but aren't places (e.g. "DEPT"). */
@@ -592,13 +592,24 @@ async function main() {
     const name = codeFile.codes[code];
     // An explicit mapping wins; otherwise a building that already carries the code
     // (an OSM ref, or a hand-placed building with the code as an alias).
-    const matches = name
-      ? buildings.filter((b) =>
-          name.endsWith("*")
-            ? normalize(b.name).startsWith(normalize(name.slice(0, -1)))
-            : [b.name, ...b.aliases].some((n) => normalize(n) === normalize(name)),
-        )
-      : buildings.filter((b) => b.aliases.some((a) => a.toUpperCase() === code));
+    // A building's own name beats another building that lists it as an alias.
+    const byName = name && !name.endsWith("*") ? buildings.filter((b) => normalize(b.name) === normalize(name)) : [];
+    const matches = byName.length
+      ? byName
+      : name
+        ? buildings.filter((b) =>
+            name.endsWith("*")
+              ? normalize(b.name).startsWith(normalize(name.slice(0, -1)))
+              : [b.name, ...b.aliases].some((n) => normalize(n) === normalize(name)),
+          )
+        : buildings.filter((b) => b.aliases.some((a) => a.toUpperCase() === code));
+    if (matches.length > 1) {
+      // One code, one building: otherwise a class could lead to either of them.
+      unresolved.push(`${code} matches ${matches.length} buildings (${matches.map((b) => b.name).join(" / ")}); name one`);
+      continue;
+    }
+    // UC San Diego's alias lists put some codes on neighbors too (CNCB on CMM East).
+    for (const b of buildings) if (!matches.includes(b)) b.aliases = b.aliases.filter((a) => a !== code);
     if (matches.length === 0) {
       if (codeFile.unplaced[code]) unplaced.push(`${code} (${codeFile.unplaced[code]})`);
       else {

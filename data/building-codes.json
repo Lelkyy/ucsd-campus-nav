@@ -1,7 +1,7 @@
 {
   "codes": {
     "APM": "Applied Physics and Mathematics",
-    "ASANT": "Asante Hall",
+    "ASANT": "Asante House Meeting Rooms",
     "BIO": "Biology",
     "BONN": "Bonner Hall",
     "BRF2": "Biomedical Research Facility II (BRF II)",
@@ -10,7 +10,7 @@
     "CENTR": "Center Hall",
     "CMME": "Cellular and Molecular Medicine East",
     "CMRR": "Center for Magnetic Recording Research",
-    "CNCB": "Cellular and Molecular Medicine East",
+    "CNCB": "Center for Neural Circuits and Behavior",
     "COA": "Coalition",
     "CPMC": "Conrad Prebys Music Center",
     "CSB": "Cognitive Science Building",
@@ -24,7 +24,7 @@
     "GH": "Galbraith Hall",
     "HSS": "Humanities & Social Sciences",
     "HUBBS": "Hubbs Hall",
-    "IGPP": "IGPP*",
+    "IGPP": "IGPP, Munk Laboratory",
     "LASB": "Gildred Latin American Studies",
     "LEDDN": "Humanities & Social Sciences",
     "LFFB": "Leichtag Family Foundation Biomedical Research Building",
@@ -33,15 +33,15 @@
     "MAYER": "Mayer Hall",
     "MCC": "Communications",
     "MCGIL": "McGill Hall",
-    "MCTF": "Marine Conservation Facility",
+    "MCTF": "Marine Conservation and Technology Facility",
     "MET": "Medical Education and Telemedicine Building",
     "MNDLR": "Mandler Hall",
     "MTF": "Medical Teaching",
-    "MWEIS": "Mandell Weiss*",
-    "MYR-A": "Mayer Hall",
+    "MWEIS": "Mandell Weiss Forum",
+    "MYR-A": "Mayer Hall Addition",
     "NIERN": "Nierenberg Hall",
     "NSB": "Natural Science Building",
-    "OAR": "Keck OAR Building*",
+    "OAR": "Keck OAR Building 1",
     "OTRSN": "Otterson Hall Rady School of Management",
     "PACIF": "Pacific Hall",
     "PCYNH": "Pepper Canyon Hall",
@@ -54,6 +54,7 @@
     "RECGM": "Rec Gym",
     "RITTR": "Ritter Hall",
     "RVCOM": "Revelle Commons",
+    "RWAC": "Arts and Humanities",
     "SCRM": "Sanford Consortium for Regenerative Medicine",
     "SDSC": "San Diego Supercomputer Center",
     "SEVW2": "Seventh College West #2",
@@ -65,10 +66,10 @@
     "SUMNR": "Sumner Auditorium",
     "TASB": "Triton Administrative Services Building",
     "TATA": "Tata Hall for the Sciences",
-    "UNEXG": "UCSD Extended Studies",
-    "UNEXN": "UCSD Extended Studies",
+    "UNEXG": "Extended Studies and Public Programs - Building G",
+    "UNEXN": "Extended Studies and Public Programs - Building N",
     "UREY": "Urey Hall",
-    "VAF": "Visual Arts Facility*",
+    "VAF": "Visual Arts Facility - Building 2",
     "VAUGN": "Vaughan Hall",
     "WFH": "Wells Fargo Hall",
     "WLH": "Warren Lecture Hall",
@@ -83,6 +84,7 @@
     "SEQUO": "Sequoyah Hall (Marshall College) is not in OpenStreetMap"
   },
   "renames": {
-    "Literature": "Halicioglu Data Science Institute"
+    "Literature": "Halicioglu Data Science Institute",
+    "Student Success Building": "Triton Administrative Services Building"
   }
 }

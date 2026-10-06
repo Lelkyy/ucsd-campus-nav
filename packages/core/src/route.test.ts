@@ -368,6 +368,25 @@ describe("real campus data", () => {
     const stale = Object.keys(codes.unplaced).filter((code) => buildings.some((b) => b.aliases.includes(code)));
     expect(stale).toEqual([]);
   });
+
+  it("puts each building code on just one building", () => {
+    const codes = JSON.parse(readFileSync(new URL("../../../data/building-codes.json", import.meta.url), "utf8")) as {
+      codes: Record<string, string>;
+    };
+    const rooms = existsSync(roomsPath) ? (JSON.parse(readFileSync(roomsPath, "utf8")) as { rooms: Record<string, string[]> }).rooms : {};
+    const shared = [...new Set([...Object.keys(codes.codes), ...Object.keys(rooms)])].flatMap((code) => {
+      const on = buildings.filter((b) => b.aliases.includes(code)).map((b) => b.name);
+      return on.length > 1 ? [`${code}: ${on.join(" / ")}`] : [];
+    });
+    expect(shared).toEqual([]);
+    // Codes whose neighbors share a name or an alias list (TSS names the building).
+    const at = (code: string) => buildings.find((b) => b.aliases.includes(code))?.name;
+    expect(at("CNCB")).toBe("Center for Neural Circuits and Behavior");
+    expect(at("MYR-A")).toBe("Mayer Hall Addition");
+    expect(at("VAF")).toBe("Visual Arts Facility - Building 2");
+    expect(at("UNEXG")).toBe("Extended Studies and Public Programs - Building G");
+    expect(at("UNEXN")).toBe("Extended Studies and Public Programs - Building N");
+  });
 });
 
 describe("nextClass", () => {
