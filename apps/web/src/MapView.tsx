@@ -215,6 +215,8 @@ export function MapView(props: MapViewProps) {
           "line-blur": ["interpolate", ["exponential", 2], ["zoom"], 13, 3, 20, 384],
         },
       });
+      // OpenStreetMap's streets and their names over both maps (under the app's own layers).
+      for (const layer of STREET_LAYERS) map.addLayer(layer);
       for (const layer of UCSD_LAYERS) map.addLayer({ ...layer, layout: { ...layer.layout, visibility: "none" } } as LayerSpecification);
 
       for (const id of ["route", "connectors", "stops", "doors", "day", "places"]) {
@@ -414,6 +416,11 @@ export function MapView(props: MapViewProps) {
     for (const layer of UCSD_GROUND) map.setLayoutProperty(layer.id, "visibility", vis(!illustrated));
     map.setLayoutProperty("illustrated", "visibility", vis(illustrated));
     map.setLayoutProperty("illustrated-edge", "visibility", vis(illustrated));
+    // Streets: light with a warm edge on the campus map; in the drawing's own gray over the drawing.
+    const street = illustrated ? STREET_STYLE.illustrated : STREET_STYLE.campus;
+    map.setPaintProperty("streets-casing", "line-color", street.casing);
+    map.setPaintProperty("streets", "line-color", street.fill);
+    for (const id of ["streets-casing", "streets"]) map.setPaintProperty(id, "line-opacity", streetOpacity(street.opacity));
     for (const { id, type } of osmLayers.current) {
       if (type !== "background") map.setLayoutProperty(id, "visibility", vis(illustrated && showsUnderDrawing(id, type)));
       // What shows while tiles load: the drawing's green, or the campus map's pale ground.
@@ -773,6 +780,70 @@ const UCSD_GROUND: LayerSpecification[] = [
     "source-layer": "Construction Buildings",
     layout: { visibility: "none" },
     paint: { "fill-color": "#e6dfc6", "fill-outline-color": "#9a927e" },
+  },
+];
+
+/** Street classes drawn over the maps; service roads (parking aisles, driveways) only up close. */
+const STREET_CLASSES = ["motorway", "trunk", "primary", "secondary", "tertiary", "minor", "service"];
+const STREET_STYLE = {
+  campus: { fill: "#fbfaf5", casing: "#c3baa6", opacity: 1 },
+  illustrated: { fill: "#8c8c8c", casing: "#5e5e5e", opacity: 0.75 },
+};
+const streetOpacity = (base: number): ExpressionSpecification => ["step", ["zoom"], ["match", ["get", "class"], "service", 0, base], 16, base];
+/** Width by street class, growing with zoom; the casing a little wider. */
+const streetWidth = (extra: number): ExpressionSpecification =>
+  [
+    "interpolate",
+    ["exponential", 1.5],
+    ["zoom"],
+    13,
+    ["match", ["get", "class"], ["motorway", "trunk"], 2 + extra / 3, ["primary", "secondary"], 1.6 + extra / 3, "tertiary", 1.2 + extra / 3, 0.6 + extra / 3],
+    18,
+    ["match", ["get", "class"], ["motorway", "trunk"], 18 + extra, ["primary", "secondary"], 15 + extra, "tertiary", 12 + extra, "minor", 9 + extra, 6 + extra],
+  ] as unknown as ExpressionSpecification;
+const STREET_FILTER: ExpressionSpecification = [
+  "all",
+  ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
+  ["!=", ["get", "brunnel"], "tunnel"],
+  ["match", ["get", "class"], STREET_CLASSES, true, false],
+];
+const STREET_LAYERS: LayerSpecification[] = [
+  {
+    id: "streets-casing",
+    type: "line",
+    source: "openmaptiles",
+    "source-layer": "transportation",
+    minzoom: 13,
+    filter: STREET_FILTER,
+    layout: { "line-join": "round", "line-cap": "round" },
+    paint: { "line-color": STREET_STYLE.campus.casing, "line-width": streetWidth(2) },
+  },
+  {
+    id: "streets",
+    type: "line",
+    source: "openmaptiles",
+    "source-layer": "transportation",
+    minzoom: 13,
+    filter: STREET_FILTER,
+    layout: { "line-join": "round", "line-cap": "round" },
+    paint: { "line-color": STREET_STYLE.campus.fill, "line-width": streetWidth(0) },
+  },
+  {
+    id: "street-names",
+    type: "symbol",
+    source: "openmaptiles",
+    "source-layer": "transportation_name",
+    minzoom: 14,
+    filter: ["match", ["get", "class"], [...STREET_CLASSES, "path"], true, false],
+    layout: {
+      "symbol-placement": "line",
+      "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": ["interpolate", ["linear"], ["zoom"], 14, 10.5, 18, 13],
+      "text-rotation-alignment": "map",
+      "text-max-angle": 30,
+    },
+    paint: { "text-color": "#4a4538", "text-halo-color": "rgba(255,255,255,0.9)", "text-halo-width": 1.5 },
   },
 ];
 

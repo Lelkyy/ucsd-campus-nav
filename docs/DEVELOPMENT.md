@@ -223,6 +223,12 @@ The **Map** button picks one of two campus maps (kept in `localStorage`,
 
 In Campus mode the topographic map covers all of OpenStreetMap's drawing.
 
+On both, OpenStreetMap's streets and their names are drawn on top
+(`STREET_LAYERS`, under the app's own layers): light with a warm edge on the
+campus map, the drawing's gray (75% opaque) over the illustrated one, by street
+class, with service roads (parking aisles, driveways) only from zoom 16, and
+names along streets and named walks.
+
 **Places** come from the same campus map's "Campus Points Of Interest - Public"
 layer, grouped into nine categories in `scripts/fetch-campus-places.ts`
 (internal ones like waypoints, offices and conference rooms are left out) and
