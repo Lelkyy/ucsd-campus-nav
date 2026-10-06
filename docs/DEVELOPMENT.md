@@ -54,6 +54,12 @@ data/private/* (TSS) ──────┘                               ▼
     (parking aisles, driveways) don't count.
   - **Other roads** are walked only where they're the sole link to a campus
     building or shuttle stop. Path pieces that lead to neither are dropped.
+  - **Stepping across** (`addStepAcross`): footpaths that come within 5 m of
+    each other without meeting in OSM (a path ending just short of another,
+    two paths side by side) get a short walking link, unless the walk between
+    them along the paths is already under 25 m (or 4x the gap). Only points
+    on footpaths alone (not road junctions or stairs), never between levels
+    (`levelKey`: bridge, tunnel, indoors), never through a building wall.
   - **Riding** can also use every other road in the area that bikes are allowed on.
   - Only buildings inside the OSM campus boundary are included. Each building
     gets route targets: mapped entrances when OSM has them, otherwise path

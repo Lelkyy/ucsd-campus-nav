@@ -198,6 +198,10 @@ async function main() {
     edgeKeys.add(key);
     edges.push([a, b, kind, bikeOk, name]);
   };
+  // Which level each node is on (ground, a bridge, a tunnel, indoors), so paths on different
+  // levels that pass close in plan view aren't joined.
+  const nodeLevels = new Map<number, Set<string>>();
+  const onLevel = (i: number, level: string) => (nodeLevels.get(i) ?? nodeLevels.set(i, new Set()).get(i)!).add(level);
   const osmNode = (id: number, lon: number, lat: number) => {
     let i = osmIndex.get(id);
     if (i === undefined) {
@@ -221,6 +225,8 @@ async function main() {
       const a = osmNode(way.nodes[k], way.geometry[k].lon, way.geometry[k].lat);
       const b = osmNode(way.nodes[k + 1], way.geometry[k + 1].lon, way.geometry[k + 1].lat);
       addEdge(a, b, kind, bikeOk, nameId(way.tags.name));
+      onLevel(a, levelKey(way.tags));
+      onLevel(b, levelKey(way.tags));
     }
   }
 
@@ -425,6 +431,12 @@ async function main() {
 
   // --- Keep only the roads that are the sole link to a campus building or stop:
   // the shortest-path tree from central campus, with roads heavily discouraged.
+  // --- Stepping across: footpaths that come within a few meters of each other without meeting
+  // in OSM (a path ending just short of another, two paths side by side) get a short link, unless
+  // the walk between them is already short. Never across levels or through a building wall.
+  const stepAcross = addStepAcross(coords, edges, index, nodeLevels, rawBuildings);
+  for (const [a, b] of stepAcross) addEdge(a, b, EdgeKind.Path, false);
+
   const required = new Set<number>();
   for (const b of campusBuildings) targetsOf(b, () => true).targets.forEach((t) => required.add(t));
   const pointPlaces = [
@@ -691,7 +703,7 @@ async function main() {
   const count = (a: Building["access"]) => buildings.filter((b) => b.access === a).length;
   console.log(
     [
-      `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
+      `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; step-across links: ${stepAcross.length}; walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
       `walking network: ${new Set(Array.from(comps.id).filter((_, i) => walkNode[i])).size} pieces (main: ${mainSize} nodes); riding network main: ${bikeComps.size[mainBikeComponent]} nodes`,
       `blocked ways ${blockedCount}, custom paths ${customCount}`,
       process.env.VERBOSE ? `matched by shape, names differ: ${differentNames.join("; ")}` : "",
@@ -1010,6 +1022,98 @@ function components(n: number, edges: Edge[]) {
     size.push(count);
   }
   return { id, size };
+}
+
+/** A way's level: on a bridge or in a tunnel (by layer), indoors (by level), or on the ground. */
+function levelKey(t: Record<string, string>): string {
+  const on = (v?: string) => !!v && v !== "no";
+  if (on(t.bridge)) return `bridge${t.layer ?? 1}`;
+  if (on(t.tunnel)) return `tunnel${t.layer ?? -1}`;
+  if (t.indoor === "yes" || t.highway === "corridor" || t.level !== undefined) return `indoor${t.level ?? ""}`;
+  return `ground${t.layer ?? 0}`;
+}
+
+/** How close two footpaths have to come to step from one to the other. */
+const STEP_ACROSS_METERS = 5;
+/** ...when the walk between them along the paths is longer than this (or this many times the gap). */
+const STEP_ACROSS_DETOUR_METERS = 25;
+const STEP_ACROSS_KINDS = new Set<EdgeKind>([EdgeKind.Path, EdgeKind.Shared, EdgeKind.Bike, EdgeKind.Custom, EdgeKind.Sidewalk]);
+
+/** Links between nearby footpath points that the paths themselves don't join (see the call). */
+function addStepAcross(
+  coords: LngLat[],
+  edges: Edge[],
+  index: PointIndex,
+  nodeLevels: Map<number, Set<string>>,
+  buildings: { lines: LngLat[][] }[],
+): [number, number][] {
+  const adj: [number, number, EdgeKind][][] = coords.map(() => []);
+  for (const [a, b, kind] of edges) {
+    if (kind === EdgeKind.BikeOnly) continue;
+    const m = haversine(coords[a][0], coords[a][1], coords[b][0], coords[b][1]);
+    adj[a].push([b, m, kind]);
+    adj[b].push([a, m, kind]);
+  }
+  // Only points on footpaths alone: not road junctions or stairs, so no shortcut skips a crossing or steps.
+  const footOnly = (i: number) => adj[i].length > 0 && adj[i].every(([, , k]) => STEP_ACROSS_KINDS.has(k));
+  const sameLevel = (a: number, b: number) => {
+    const la = nodeLevels.get(a);
+    const lb = nodeLevels.get(b);
+    return !la || !lb || [...la].some((l) => lb.has(l));
+  };
+  // Whether the paths already get from a to b within `limit` meters (a small Dijkstra).
+  const walkWithin = (a: number, b: number, limit: number) => {
+    const dist = new Map<number, number>([[a, 0]]);
+    const queue: [number, number][] = [[0, a]];
+    while (queue.length) {
+      queue.sort((x, y) => x[0] - y[0]);
+      const [d, v] = queue.shift()!;
+      if (v === b) return true;
+      if (d > (dist.get(v) ?? Infinity)) continue;
+      for (const [w, m] of adj[v]) {
+        const nd = d + m;
+        if (nd <= limit && nd < (dist.get(w) ?? Infinity)) {
+          dist.set(w, nd);
+          queue.push([nd, w]);
+        }
+      }
+    }
+    return false;
+  };
+  const boxes = buildings.map((b) => {
+    const pts = b.lines.flat();
+    return [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))];
+  });
+  const throughWall = (p: LngLat, q: LngLat) =>
+    buildings.some((b, i) => {
+      const [w, s, e, n] = boxes[i];
+      if (Math.max(p[0], q[0]) < w || Math.min(p[0], q[0]) > e || Math.max(p[1], q[1]) < s || Math.min(p[1], q[1]) > n) return false;
+      return b.lines.some((ring) => ring.some((r, k) => k > 0 && segmentsCross(p, q, ring[k - 1], r)));
+    });
+
+  const links: [number, number][] = [];
+  const linked = new Set<string>();
+  for (let i = 0; i < coords.length; i++) {
+    if (!footOnly(i)) continue;
+    const p = coords[i];
+    const j = index.nearest(p, STEP_ACROSS_METERS, (j) => {
+      if (j === i || !footOnly(j) || !sameLevel(i, j) || adj[i].some(([w]) => w === j)) return false;
+      const gap = haversine(p[0], p[1], coords[j][0], coords[j][1]);
+      return !walkWithin(i, j, Math.max(STEP_ACROSS_DETOUR_METERS, 4 * gap));
+    });
+    if (j === -1) continue;
+    const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+    if (linked.has(key) || throughWall(p, coords[j])) continue;
+    linked.add(key);
+    links.push([i, j]);
+  }
+  return links;
+}
+
+/** Whether segments pq and rs properly cross. */
+function segmentsCross(p: LngLat, q: LngLat, r: LngLat, s: LngLat): boolean {
+  const o = (a: LngLat, b: LngLat, c: LngLat) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+  return o(p, q, r) !== o(p, q, s) && o(r, s, p) !== o(r, s, q);
 }
 
 class PointIndex {
