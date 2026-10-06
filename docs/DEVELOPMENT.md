@@ -182,10 +182,11 @@ The **Map** button picks one of two campus maps (kept in `localStorage`,
   The tiles are muted toward gray (`raster-saturation`), and campus is drawn
   on them from UCSD's own ground-level layer in the same vector tiles
   (`UCSD_GROUND`, by `_symbol`): sage lawns, cream walkways, warm gray
-  buildings with a darker edge, clay for the track, in the app's palette.
+  buildings with a darker edge, clay for the track, in the app's palette, at
+  every zoom (UCSD's tiles carry it from zoom 12).
   (Raising `raster-contrast` on the tiles only bleaches their light colors.)
   OpenStreetMap's footpaths (`path` and `pedestrian`, not tunnels) go on top
-  from zoom 15 for the small ones UCSD's layer leaves out: white with a soft
+  from zoom 14 (faint until 15) for the small ones UCSD's layer leaves out: white with a soft
   warm edge (`campus-paths`, `campus-paths-casing`).
 - **Illustrated:** UC San Diego's drawn campus map, the Concept3D tiles behind
   the old maps.ucsd.edu (`assets.concept3d.com/assets/1005/1005_Map_9`, TMS

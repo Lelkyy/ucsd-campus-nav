@@ -167,15 +167,15 @@ export function MapView(props: MapViewProps) {
       for (const layer of UCSD_GROUND) map.addLayer(layer);
       // The campus map leaves out most footpaths: OpenStreetMap's, on top of it, white with a soft warm edge.
       for (const [id, color, width] of [
-        ["campus-paths-casing", "#bdb5a1", [15, 2.2, 17, 4, 20, 11]],
-        ["campus-paths", "#ffffff", [15, 1, 17, 2.2, 20, 7]],
+        ["campus-paths-casing", "#bdb5a1", [14, 1.2, 15, 2.2, 17, 4, 20, 11]],
+        ["campus-paths", "#ffffff", [14, 0.5, 15, 1, 17, 2.2, 20, 7]],
       ] as const) {
         map.addLayer({
           id,
           type: "line",
           source: "openmaptiles",
           "source-layer": "transportation",
-          minzoom: 15,
+          minzoom: 14,
           filter: [
             "all",
             ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
@@ -183,7 +183,11 @@ export function MapView(props: MapViewProps) {
             ["match", ["get", "class"], ["path", "pedestrian"], true, false],
           ],
           layout: { "line-join": "round", "line-cap": "round" },
-          paint: { "line-color": color, "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], ...width] },
+          paint: {
+            "line-color": color,
+            "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], ...width],
+            "line-opacity": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 15, 1],
+          },
         });
       }
       map.addSource("illustrated", {
@@ -730,11 +734,9 @@ const UCSD_GROUND: LayerSpecification[] = [
     type: "fill",
     source: "ucsd",
     "source-layer": "Ground Level Basemap",
-    minzoom: 14,
     layout: { visibility: "none" },
     paint: {
       "fill-color": ["match", ["get", "_symbol"], ...GROUND_COLORS.flatMap(([ids, c]) => [ids, c]), "#e8e4d8"] as unknown as ExpressionSpecification,
-      "fill-opacity": ["interpolate", ["linear"], ["zoom"], 14, 0, 14.6, 1],
     },
   },
   {
@@ -742,17 +744,15 @@ const UCSD_GROUND: LayerSpecification[] = [
     type: "line",
     source: "ucsd",
     "source-layer": "Ground Level Basemap",
-    minzoom: 15,
     filter: ["==", ["get", "_symbol"], 3],
     layout: { visibility: "none", "line-join": "round" },
-    paint: { "line-color": "#9a927e", "line-width": ["interpolate", ["linear"], ["zoom"], 15, 0.6, 18, 1.4] },
+    paint: { "line-color": "#9a927e", "line-width": ["interpolate", ["linear"], ["zoom"], 13, 0.3, 15, 0.6, 18, 1.4] },
   },
   {
     id: "ucsd-construction",
     type: "fill",
     source: "ucsd",
     "source-layer": "Construction Buildings",
-    minzoom: 14,
     layout: { visibility: "none" },
     paint: { "fill-color": "#e6dfc6", "fill-outline-color": "#9a927e" },
   },
