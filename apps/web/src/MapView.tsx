@@ -19,8 +19,6 @@ import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { useEffect, useRef, useState } from "react";
 
 const BASE_STYLE = "https://tiles.openfreemap.org/styles/liberty";
-const SATELLITE_TILES =
-  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 /** UC San Diego's illustrated campus map (by Concept3D, the old maps.ucsd.edu); TMS rows. */
 const ILLUSTRATED_TILES = "https://assets.concept3d.com/assets/1005/1005_Map_9/{z}/{x}/{y}";
 /** Esri's topographic map, which the official ArcGIS campus map is drawn on. */
@@ -28,8 +26,8 @@ const TOPO_TILES = "https://services.arcgisonline.com/arcgis/rest/services/World
 /** UC San Diego's campus vector tiles, for its district names and campus boundary. */
 const UCSD_VECTOR_TILES = "https://tiles.arcgis.com/tiles/mXNwDpiENQiMIzRv/arcgis/rest/services/CampusMapVectorApril2/VectorTileServer/tile/{z}/{y}/{x}.pbf";
 
-/** The map underneath: the app's own, UCSD's illustrated one, the official campus map, or satellite. */
-export type BaseMap = "map" | "illustrated" | "campus" | "satellite";
+/** The map underneath: the official campus map, or UCSD's illustrated one on top of it. */
+export type BaseMap = "campus" | "illustrated";
 
 /** Places from UCSD's campus map (apps/web/public/data/campus-places.json). */
 export interface CampusPlaces {
@@ -108,8 +106,8 @@ export function MapView(props: MapViewProps) {
   const roomLabel = useRef<HTMLSpanElement | null>(null);
   const [ready, setReady] = useState(false);
   const lastTrip = useRef<string | null>(null);
-  const baseSymbols = useRef<string[]>([]);
   const popup = useRef<Popup | null>(null);
+  const osmLayers = useRef<{ id: string; type: string }[]>([]);
 
   // Keep the latest callbacks without re-binding map listeners.
   const callbacks = useRef(props);
@@ -145,24 +143,25 @@ export function MapView(props: MapViewProps) {
     };
 
     map.on("load", () => {
-      tintBaseMap(map);
-      // The base map's own bus and trolley stop icons are off: the app shows only the stops a route uses.
-      if (map.getLayer("poi_transit")) map.setLayoutProperty("poi_transit", "visibility", "none");
-      for (const id of ["poi_r1", "poi_r7", "poi_r20"]) {
-        const filter = map.getLayer(id) ? map.getFilter(id) : null;
-        const notTransit: ExpressionSpecification = [
-          "all",
-          ["match", ["get", "class"], ["bus", "rail", "railway"], false, true],
-          ["match", ["get", "subclass"], ["bus_stop", "station", "halt", "tram_stop", "platform"], false, true],
-        ];
-        if (filter) map.setFilter(id, ["all", filter as ExpressionSpecification, notTransit]);
-      }
-      const firstSymbol = map.getStyle().layers.find((l) => l.type === "symbol")?.id;
-      // The base map's own labels and icons: hidden under maps that bring their own.
-      baseSymbols.current = map
-        .getStyle()
-        .layers.filter((l) => l.type === "symbol")
-        .map((l) => l.id);
+      // OpenStreetMap's drawing, recolored like the illustrated map: it's what's around the drawing in
+      // Illustrated mode (labels and icons stay off, so nothing lands on the drawing). The campus map
+      // covers it in Campus mode.
+      osmLayers.current = map.getStyle().layers.map((l) => ({ id: l.id, type: l.type }));
+      paintLikeIllustrated(map);
+      map.addSource("topo", {
+        type: "raster",
+        tiles: [TOPO_TILES],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: "Campus map © UC San Diego, Esri",
+      });
+      // Esri's tiles are pale: stronger color (not contrast, which only bleaches light colors) so buildings stand off the campus ground and white paths read.
+      map.addLayer({
+        id: "topo",
+        type: "raster",
+        source: "topo",
+        paint: { "raster-saturation": 0.7, "raster-brightness-max": 0.93 },
+      });
       map.addSource("illustrated", {
         type: "raster",
         tiles: [ILLUSTRATED_TILES],
@@ -173,28 +172,9 @@ export function MapView(props: MapViewProps) {
         bounds: [-117.26, 32.855, -117.2, 32.895],
         attribution: "Illustrated map © UC San Diego",
       });
-      map.addLayer({ id: "illustrated", type: "raster", source: "illustrated", layout: { visibility: "none" } }, firstSymbol);
-      map.addSource("topo", {
-        type: "raster",
-        tiles: [TOPO_TILES],
-        tileSize: 256,
-        maxzoom: 19,
-        attribution: "Campus map © UC San Diego, Esri",
-      });
-      map.addLayer({ id: "topo", type: "raster", source: "topo", layout: { visibility: "none" } }, firstSymbol);
+      map.addLayer({ id: "illustrated", type: "raster", source: "illustrated", layout: { visibility: "none" } });
       map.addSource("ucsd", { type: "vector", tiles: [UCSD_VECTOR_TILES], minzoom: 0, maxzoom: 16 });
       for (const layer of UCSD_LAYERS) map.addLayer({ ...layer, layout: { ...layer.layout, visibility: "none" } } as LayerSpecification);
-      map.addSource("satellite", {
-        type: "raster",
-        tiles: [SATELLITE_TILES],
-        tileSize: 256,
-        maxzoom: 19,
-        attribution: "Imagery © Esri, Maxar, Earthstar Geographics",
-      });
-      map.addLayer(
-        { id: "satellite", type: "raster", source: "satellite", layout: { visibility: "none" } },
-        firstSymbol,
-      );
 
       for (const id of ["route", "connectors", "stops", "doors", "day", "places"]) {
         map.addSource(id, { type: "geojson", data: EMPTY });
@@ -384,14 +364,17 @@ export function MapView(props: MapViewProps) {
     if (!ready) return;
     const map = mapRef.current!;
     const vis = (on: boolean) => (on ? "visible" : "none");
-    const base = props.baseMap;
-    map.setLayoutProperty("satellite", "visibility", vis(base === "satellite"));
-    map.setLayoutProperty("illustrated", "visibility", vis(base === "illustrated"));
-    map.setLayoutProperty("topo", "visibility", vis(base === "campus"));
-    for (const layer of UCSD_LAYERS) map.setLayoutProperty(layer.id, "visibility", vis(base === "campus"));
-    // The illustrated and campus maps have their own names; the base map's would double them.
-    const ownLabels = base === "illustrated" || base === "campus";
-    for (const id of baseSymbols.current) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis(!ownLabels));
+    const illustrated = props.baseMap === "illustrated";
+    // Campus: the topographic campus map over everything of OpenStreetMap's. Illustrated: the drawing,
+    // on OpenStreetMap drawn in its colors.
+    map.setLayoutProperty("topo", "visibility", vis(!illustrated));
+    map.setLayoutProperty("illustrated", "visibility", vis(illustrated));
+    for (const { id, type } of osmLayers.current) {
+      if (type !== "background") map.setLayoutProperty(id, "visibility", vis(illustrated && showsUnderDrawing(id, type)));
+      // What shows while tiles load: the drawing's green, or the campus map's pale ground.
+      else map.setPaintProperty(id, "background-color", illustrated ? "#9cb478" : "#ece8ef");
+    }
+    for (const layer of UCSD_LAYERS) map.setLayoutProperty(layer.id, "visibility", vis(props.baseMap === "campus"));
   }, [ready, props.baseMap]);
 
   useEffect(() => {
@@ -596,27 +579,6 @@ function lineFeature(coords: LngLat[]): GeoJSON.Feature<GeoJSON.LineString> {
   return { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } };
 }
 
-/**
- * Recolor the base map around the logo's colors: its pale lime ground, rich
- * greens for parks, grass and canyons, clear blue water, warm golden roads.
- */
-const BASE_TINTS: [RegExp, "background-color" | "fill-color" | "line-color" | "fill-extrusion-color", string][] = [
-  [/^background$/, "background-color", "#f4f8d6"],
-  [/^park$/, "fill-color", "#c6e2a2"],
-  [/^landcover_grass$/, "fill-color", "#b4d88c"],
-  [/^landcover_wood$/, "fill-color", "#9cca78"],
-  [/^landuse_(pitch|track|cemetery)$/, "fill-color", "#cde6a9"],
-  [/^landuse_school$/, "fill-color", "#eef3c4"],
-  [/^landuse_hospital$/, "fill-color", "#f7d9d2"],
-  [/^landuse_residential$/, "fill-color", "#ecf1cc"],
-  [/^water$/, "fill-color", "#8ec5e6"],
-  [/^waterway_/, "line-color", "#78b4da"],
-  [/_casing$/, "line-color", "#d1b98c"],
-  [/^(road|bridge|tunnel)_(motorway|motorway_link)$/, "line-color", "#f4b860"],
-  [/^(road|bridge|tunnel)_(trunk_primary|secondary_tertiary|link)$/, "line-color", "#ffe39a"],
-  [/^building$/, "fill-color", "#ddd5c0"],
-  [/^building-3d$/, "fill-extrusion-color", "#ddd5c0"],
-];
 
 /**
  * From UCSD's campus vector style: the campus boundary and the district and
@@ -681,6 +643,44 @@ const UCSD_LAYERS = [
   },
 ] as const;
 
+/**
+ * OpenStreetMap in the illustrated map's colors (sampled from its tiles): grass
+ * and wooded canyons in greens, gray roads, cream footpaths, pale gray roofs.
+ */
+const ILLUSTRATED_PAINT: [RegExp, "background-color" | "fill-color" | "line-color", string][] = [
+  [/^background$/, "background-color", "#9cb478"],
+  [/^landcover_(grass|wetland)$|^landuse_(pitch|track|cemetery)$/, "fill-color", "#9cb878"],
+  [/^park$/, "fill-color", "#90b06c"],
+  [/^park_outline$/, "line-color", "#7c9c58"],
+  [/^landcover_wood$/, "fill-color", "#6c8a44"],
+  [/^landuse_residential$|^landuse_(school|hospital|commercial|industrial|retail)$/, "fill-color", "#a8bc88"],
+  [/^landcover_sand$/, "fill-color", "#d6cfa6"],
+  [/^water$/, "fill-color", "#6aaed6"],
+  [/^waterway/, "line-color", "#6aaed6"],
+  [/_casing$/, "line-color", "#5a5a5a"],
+  [/^(road|bridge|tunnel)_(path|pedestrian)/, "line-color", "#ece8de"],
+  [/^(road|bridge|tunnel)_/, "line-color", "#7a7a7a"],
+  [/^building$/, "fill-color", "#cdcdcd"],
+];
+
+function paintLikeIllustrated(map: MlMap) {
+  for (const layer of map.getStyle().layers) {
+    const rule = ILLUSTRATED_PAINT.find(([re]) => re.test(layer.id));
+    if (!rule) continue;
+    try {
+      map.setPaintProperty(layer.id, rule[1], rule[2]);
+    } catch {
+      // A layer of a different type than expected: leave it as the style draws it.
+    }
+  }
+}
+
+/** Which of OpenStreetMap's layers show around the drawing: flat shapes and lines, no labels, 3D or borders. */
+function showsUnderDrawing(id: string, type: string): boolean {
+  if (type === "symbol" || type === "fill-extrusion" || type === "raster") return false;
+  return !/boundary|aeroway|_pattern$|hatching/.test(id);
+}
+
 /** The popup for a tapped place. */
 function placeCard(name: string, kind: string, building: string, onGo: () => void): HTMLElement {
   const el = document.createElement("div");
@@ -697,14 +697,3 @@ function placeCard(name: string, kind: string, building: string, onGo: () => voi
   return el;
 }
 
-function tintBaseMap(map: MlMap) {
-  for (const layer of map.getStyle().layers) {
-    const tint = BASE_TINTS.find(([re]) => re.test(layer.id));
-    if (!tint) continue;
-    try {
-      map.setPaintProperty(layer.id, tint[1], tint[2]);
-    } catch {
-      // A layer of a different type than expected: leave it as the style draws it.
-    }
-  }
-}

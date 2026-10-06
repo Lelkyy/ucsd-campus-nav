@@ -3,7 +3,6 @@ import {
   MODES,
   buildSteps,
   findRoom,
-  roomFloor,
   type IndoorData,
   formatFare,
   routeLabel,
@@ -45,7 +44,6 @@ import {
   WalkIcon,
 } from "./Icons.tsx";
 import { InsideCard } from "./InsideCard.tsx";
-import { RoomPointer } from "./RoomPointer.tsx";
 import { NavigationView } from "./NavigationView.tsx";
 import type { DirectionsOptions } from "./DayView.tsx";
 import { TimingControl, type TimingState } from "./TimingControl.tsx";
@@ -71,8 +69,6 @@ export function App() {
   const saved = useSavedPlaces();
   /** Camera moves ("Show it on the map"). */
   const [focus, setFocus] = useState<{ at: LngLat; zoom: number; key: number } | null>(null);
-  /** Height of the room pointer in the map's corner, so the map buttons sit below it. */
-  const [insetHeight, setInsetHeight] = useState(0);
   /** The "Save place" form under a route is open. */
   const [naming, setNaming] = useState(false);
   /** Saving your home: which field asked (it gets Home once you tap the map). */
@@ -111,7 +107,8 @@ export function App() {
 
   /** Phones: the panel is a bottom sheet that can be pulled up. */
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [baseMap, setBaseMap] = useState<BaseMap>(() => storage.get<BaseMap>("campus-nav:base-map", "map"));
+  // Campus or illustrated (anything saved from before those were the only two is campus).
+  const [baseMap, setBaseMap] = useState<BaseMap>(() => (storage.get<string>("campus-nav:base-map", "campus") === "illustrated" ? "illustrated" : "campus"));
   useEffect(() => storage.set("campus-nav:base-map", baseMap), [baseMap]);
   const [placeCategories, setPlaceCategories] = useState<string[]>(() => storage.get<string[]>("campus-nav:place-categories", []));
   useEffect(() => storage.set("campus-nav:place-categories", placeCategories), [placeCategories]);
@@ -287,6 +284,32 @@ export function App() {
     [data, mode, planFor],
   );
 
+  /**
+   * The day view's trips to and from your saved home: arriving at a class by
+   * `at` ("to"), or leaving one at `at` ("from"). By shuttle in Transit mode,
+   * since home is often off campus; otherwise in your mode, on foot as a fallback.
+   */
+  const estimateHome = useCallback(
+    (buildingId: string, dir: "to" | "from", at: Date): Route | null => {
+      const building = data?.buildingById.get(buildingId);
+      if (!saved.home || !building) return null;
+      const home: Endpoint = { kind: "place", place: saved.home };
+      const there: Endpoint = { kind: "building", building };
+      const [a, b] = dir === "to" ? [home, there] : [there, home];
+      const timing = dir === "to" ? { arriveBy: at } : { departAt: at };
+      if (mode === "bus") {
+        const best = transitFor(a, b, timing)?.options[0]?.route;
+        if (best) return best;
+      }
+      const m: ModeId = mode === "bike" || mode === "accessible" ? mode : "walk";
+      const p = planFor(m, a, b, timing.arriveBy, timing.departAt);
+      if (p?.ok) return p.route;
+      const w = m !== "walk" ? planFor("walk", a, b, timing.arriveBy, timing.departAt) : null;
+      return w?.ok ? w.route : null;
+    },
+    [data, saved.home, mode, planFor, transitFor],
+  );
+
   const allPlaces = useMemo(() => [...saved.places, ...(data?.places.places ?? [])], [saved.places, data]);
   const placeById = useMemo(() => new Map(allPlaces.map((p) => [p.id, p])), [allPlaces]);
   const campusSearch = useMemo(
@@ -303,8 +326,6 @@ export function App() {
     [data, destBuilding, to, route, indoor],
   );
 
-  const destRoom = to?.kind === "building" ? to.room : undefined;
-  const destFloor = destBuilding && destRoom ? roomFloor(indoor[destBuilding.id], destRoom) : undefined;
   const tips = useMemo(() => {
     if (!data || !destBuilding) return [];
     const codes = destBuilding.aliases.filter((a) => /^[A-Z0-9-]{2,6}$/.test(a));
@@ -412,6 +433,7 @@ export function App() {
     setToRaw(withRoom({ kind: "building", building, room: meeting.room }));
     const fromBuilding = opts.from ? data?.buildingById.get(opts.from.buildingId) : undefined;
     if (fromBuilding) setFromRaw(withRoom({ kind: "building", building: fromBuilding, room: opts.from?.room }));
+    else if (opts.fromHome && saved.home) setFromRaw({ kind: "place", place: saved.home });
     else if (myLocation) setFromRaw({ kind: "point", lngLat: myLocation, label: "My location" });
     else if (!from) {
       setClickTarget("from");
@@ -427,6 +449,17 @@ export function App() {
           }
         : null,
     );
+  };
+
+  /** Directions home from a class, leaving when it ends (the day view's last class). */
+  const onDirectionsHome = (meeting: ClassMeeting, leaveAt: Date) => {
+    const building = data?.buildingById.get(meeting.buildingId);
+    if (!building || !saved.home) return;
+    setTab("go");
+    setFromRaw(withRoom({ kind: "building", building, room: meeting.room }));
+    setToRaw({ kind: "place", place: saved.home });
+    if (building.access === "shuttle" && mode !== "bike") setMode("bus");
+    setTiming(leaveAt > new Date() ? { kind: "depart", at: leaveAt } : { kind: "now" });
   };
 
   /** Open the Report tab, optionally about the route on screen. */
@@ -449,8 +482,7 @@ export function App() {
 
   return (
     <div
-      className={`app ${navigating ? "navigating" : ""} ${insetHeight ? "has-inset" : ""}`}
-      style={{ ["--inset-h" as string]: `${insetHeight}px` }}
+      className={`app ${navigating ? "navigating" : ""}`}
     >
       {data && (
         <MapView
@@ -493,16 +525,6 @@ export function App() {
           onCategories={setPlaceCategories}
         />
       </div>
-
-      {destBuilding && destRoom && !showingDay && (
-        <RoomPointer
-          key={`${destBuilding.id}-${destRoom}`}
-          building={destBuilding}
-          room={destRoom}
-          floor={destFloor}
-          onHeight={setInsetHeight}
-        />
-      )}
 
       <aside className={`sheet ${sheetOpen ? "open" : ""}`} aria-label="Directions and schedule">
         <button className="sheet-handle" aria-label={sheetOpen ? "Collapse panel" : "Expand panel"} onClick={() => setSheetOpen((v) => !v)}>
@@ -799,6 +821,10 @@ export function App() {
               estimateBetween={estimateBetween}
               onDirections={onDirections}
               onDayOverlay={setDayOverlay}
+              home={saved.home?.points[0] ?? null}
+              estimateHome={estimateHome}
+              onDirectionsHome={onDirectionsHome}
+              onSetHome={() => startSettingHome("from")}
             />
           ) : (
             <>

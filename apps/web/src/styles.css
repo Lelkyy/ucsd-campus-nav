@@ -225,7 +225,7 @@ button.link.danger { color: var(--danger); }
   background: var(--surface);
   box-shadow: var(--shadow);
 }
-.layers-section { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.layers-section { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .layers-base {
   display: flex;
   flex-direction: column;
@@ -241,26 +241,16 @@ button.link.danger { color: var(--danger); }
 .layers-base:hover:not(:disabled) { border-color: transparent; color: var(--text); }
 .layers-thumb {
   width: 100%;
-  aspect-ratio: 1;
+  aspect-ratio: 16 / 10;
   border-radius: 10px;
   border: 2px solid var(--border);
   background: #f4f8d6 center / cover no-repeat;
 }
 .layers-base.on { color: var(--text); }
 .layers-base.on .layers-thumb { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-/* One campus tile of each map as its thumbnail; the app's own map is vector, so a sketch of it. */
-.base-map .layers-thumb {
-  background-image:
-    linear-gradient(115deg, transparent 46%, #ffe39a 46% 54%, transparent 54%),
-    linear-gradient(20deg, transparent 60%, #c6e2a2 60%),
-    linear-gradient(#ddd5c0 0 0);
-  background-size: cover, cover, 34% 30%;
-  background-position: center, center, 30% 35%;
-  background-color: #f4f8d6;
-}
+/* One campus tile of each map as its thumbnail. */
 .base-illustrated .layers-thumb { background-image: url("https://assets.concept3d.com/assets/1005/1005_Map_9/16/11425/39111"); }
 .base-campus .layers-thumb { background-image: url("https://services.arcgisonline.com/arcgis/rest/services/World_Topo_Map/MapServer/tile/16/26424/11425"); }
-.base-satellite .layers-thumb { background-image: url("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/16/26424/11425"); }
 .layers-head { display: flex; align-items: baseline; justify-content: space-between; padding-top: 8px; border-top: 1px solid var(--border); font-size: 13px; }
 .layers-places { display: flex; flex-wrap: wrap; gap: 6px; }
 .layers-place {
@@ -784,44 +774,7 @@ button.start { width: 100%; padding: 11px; font-size: 15px; border-radius: 999px
 .option-leave { font-size: 12px; font-weight: 600; color: var(--focus); }
 .option-leave.late { color: var(--danger); }
 
-/* ---------- Room pins ---------- */
-
-/* ---------- Room pointer (top-right corner of the map) ---------- */
-.room-pointer {
-  position: absolute;
-  z-index: 2;
-  top: 16px;
-  right: 16px;
-  width: 200px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
-  background: var(--surface);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  font-size: 12px;
-}
-.room-pointer strong { font-size: 14px; }
-.pointer-building { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.pointer-floor { margin-top: 4px; font-family: var(--font-display); font-size: 16px; font-weight: 550; color: var(--accent); }
-.pointer-note { font-size: 11px; }
 .inside h3 { margin: 0 0 8px; }
-/* The map's zoom/locate buttons and chips move down below the card. */
-.app.has-inset .maplibregl-ctrl-top-right { top: calc(var(--inset-h) + 24px); }
-.app.has-inset .map-tools { top: calc(var(--inset-h) + 164px); }
-/* While navigating, the instruction banner stops short of the card. */
-.app.navigating.has-inset .nav-banner { right: 220px; }
-@media (max-width: 760px) {
-  .room-pointer { top: 12px; right: 12px; width: 160px; padding: 8px 10px; }
-  .app.has-inset .maplibregl-ctrl-top-right { top: calc(var(--inset-h) + 16px); }
-  .app.has-inset .map-tools { top: 12px; }
-  /* The banner spans the top on phones, so the card goes under it. */
-  .app.navigating .room-pointer { top: 104px; }
-  .app.navigating.has-inset .nav-banner { right: 12px; }
-  /* No room for the zoom buttons under both; the map follows you, and pinching zooms. */
-  .app.navigating.has-inset .maplibregl-ctrl-top-right { display: none; }
-}
 
 /* ---------- Your day (timetable) ---------- */
 .next-up-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -881,3 +834,14 @@ button.start { width: 100%; padding: 11px; font-size: 15px; border-radius: 999px
 .day-badge.skip { background: var(--muted); }
 .set-home { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); font-size: 13px; }
 .place-chip > button:first-child svg { width: 15px; height: 15px; vertical-align: -3px; }
+
+/* Your day: leaving home and getting back */
+.day-home { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 10px; padding: 10px 10px 10px 12px; border-radius: var(--radius-sm); border: 1px dashed var(--border); background: var(--surface); }
+.day-home-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
+.day-home-icon svg { width: 16px; height: 16px; }
+.day-home-text { min-width: 0; font-size: 14px; }
+.day-home-set { margin: 0; }
+@media (max-width: 760px) {
+  .day-home { grid-template-columns: 28px 1fr; }
+  .day-home > button { grid-column: 2; justify-self: start; }
+}

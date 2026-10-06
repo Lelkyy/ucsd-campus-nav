@@ -92,8 +92,7 @@ Ask Leonid for the files. Don't commit them or the generated
   "It's on the second floor" (`floorPhrase`, US floors: OSM level 0 is the first
   floor, negative levels are the basement). The floor comes from OSM indoor
   mapping (CSE, Cala) or a student's pin, else the room number, marked "going by
-  the room number". It's shown in the arrival card and, whenever the destination
-  is a room, in the map's top-right corner (`RoomPointer.tsx`).
+  the room number". It's shown in the arrival card, the day view and search.
 - **Room pins:** the build still reads `data/room-locations.json`
   (`"CODE ROOM": { at, level }`) for rooms placed by hand; the in-app pinning
   flow was removed.
@@ -140,6 +139,13 @@ your location, and every change has **Directions from** the previous class's
 room, both arriving by that day's start (`startOn`) less `CLASS_BUFFER_MIN`. The
 Next class card links to the whole day.
 
+With a home saved, the day starts with **Leave home by** (the trip to the first
+class you're going to, arriving by its start less `CLASS_BUFFER_MIN`) and ends
+with **Home by** (leaving when the last class ends), each with directions
+(`estimateHome` in `App.tsx`: by shuttle or bus in Transit mode, else in your
+mode). On the map, home gets an "H" pin and both trips are drawn. Without a
+home, the day offers "Set your home".
+
 Classes that overlap (`groupOverlaps`; no end time counts as 50 minutes) show
 as a conflict to choose from: an exam, else the earliest, until you pick, and
 the pick is kept per day in `localStorage` (`campus-nav:conflict-choices`). An
@@ -155,36 +161,35 @@ shows them (dotted, in the next class's color) with a numbered pin per building
 One light theme (no dark mode) on the Triton Trails logo's backdrop, pale lime
 #F2F8B6, with its forest greens for text and actions (#17301B, #2F5A2E) and the
 Evergreen palette's clay, blush and sage for accents: CSS custom properties in
-`styles.css`, and `palette.ts` for the map and course colors. The base map is
-recolored around the logo on load (`tintBaseMap`: lime ground, rich greens for
-parks and canyons, clear blue water, golden roads); walking routes get a white
-underlay so they read over green. Type: DM Sans (the wordmark is DM Sans bold),
+`styles.css`, and `palette.ts` for the map and course colors. Walking routes
+get a white underlay so they read over green. Type: DM Sans (the wordmark is DM Sans bold),
 Fraunces for a few headings. The logo files are in `apps/web/public/`
 (`logo.png`, `logo-mark.png`, `favicon.png`, `apple-touch-icon.png`).
 
 ## Map stops
 
-The map shows only the stops a route boards or leaves at. The base map's own
-bus, trolley and station icons are filtered out on load (`poi_transit`, and
-transit classes in the `poi_r*` layers).
+The map shows only the stops a route boards or leaves at.
 
 ## Map styles and places
 
-The **Map** button switches what's under the routes (kept in `localStorage`,
-`campus-nav:base-map`); the app's layers stay on top of every one:
+The **Map** button picks one of two campus maps (kept in `localStorage`,
+`campus-nav:base-map`); the app's layers stay on top of both:
 
-- **Map:** OpenFreeMap, recolored (`tintBaseMap`).
-- **Illustrated:** UC San Diego's drawn campus map, the Concept3D tiles behind
-  the old maps.ucsd.edu (`assets.concept3d.com/assets/1005/1005_Map_9`, TMS
-  rows, zoom 13 to 20). Transparent off campus, where the base map shows.
 - **Campus:** what the official ArcGIS campus map
   (experience.arcgis.com/experience/c97d6e2efd7947d38738d5184b2debc7) is drawn
   on: Esri World Topographic, with UCSD's own campus boundary and district names
   from its campus vector tiles (`UCSD_LAYERS`, fonts swapped to Noto Sans).
-- **Satellite:** Esri World Imagery.
+  The tiles are pale, so they're drawn with stronger color
+  (`raster-saturation`) and whites toned down a little; raising
+  `raster-contrast` instead bleaches the light colors to white.
+- **Illustrated:** UC San Diego's drawn campus map, the Concept3D tiles behind
+  the old maps.ucsd.edu (`assets.concept3d.com/assets/1005/1005_Map_9`, TMS
+  rows, zoom 13 to 20). Around it, where the drawing stops, OpenStreetMap is
+  drawn in the drawing's colors (`ILLUSTRATED_PAINT`, sampled from its tiles:
+  greens, gray roads, cream footpaths, pale gray roofs), with its labels, icons,
+  3D buildings and borders off so nothing lands on the drawing.
 
-The illustrated and campus maps hide the base map's labels and icons, which
-would double their own.
+In Campus mode the topographic map covers all of OpenStreetMap's drawing.
 
 **Places** come from the same campus map's "Campus Points Of Interest - Public"
 layer, grouped into nine categories in `scripts/fetch-campus-places.ts`
@@ -291,11 +296,9 @@ makes MTS free, and the app assumes you have one unless you untick it. Update
 
 - Paths and buildings: © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/).
   Derived databases you publish must stay under ODbL.
-- Basemap: [OpenFreeMap](https://openfreemap.org).
+- Map around the illustrated drawing, and label fonts: [OpenFreeMap](https://openfreemap.org).
 - Transit schedules: UC San Diego Triton Transit and San Diego MTS (GTFS; MTS's
   terms forbid using its trademarks or implying endorsement).
-- Satellite imagery: Esri World Imagery, used for development/tracing. A public
-  release should use a provider whose terms cover end-user display.
 - Illustrated campus map: © UC San Diego (Concept3D tiles); campus map styles
   and places: UC San Diego's public ArcGIS campus map, on Esri World Topographic.
   Check both are OK to show before a public release.

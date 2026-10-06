@@ -34,15 +34,16 @@ the way, using the paths, stairs and bike paths students actually use.
   GPS ("In 120 ft, turn left onto Library Walk"), re-routes when you go off
   course, can speak instructions, and keeps the screen on.
 - **Inside the building:** which door to use, whether there's an elevator, and
-  roughly where the room is ("It's on the second floor"), kept in the map's
-  corner.
+  roughly which floor the room is on.
 - **Your whole day:** see any day's classes in order, how long each walk between
   them takes and whether the gap is enough, and get directions to any class,
-  from where you are or from the class before. Overlapping classes show as a
-  conflict to choose from, and the day's walks are drawn on the map.
-- **Four maps to choose from:** the app's own, UC San Diego's illustrated
-  campus map, the official campus map (district names and campus boundary) or
-  satellite, with routes and paths drawn on top of each.
+  from where you are, from the class before, or from home. With a home saved,
+  the day starts with when to leave home and ends with when you'll be back.
+  Overlapping classes show as a conflict to choose from, and the day's walks
+  (and trips home) are drawn on the map.
+- **Two campus maps:** the official campus map (district names and campus
+  boundary) or UC San Diego's illustrated one, with routes and paths drawn on
+  top.
 - **Campus places:** show restrooms, food, water refill stations, study spots,
   bike racks, parking and more from UC San Diego's campus map, and get
   directions to any of them.

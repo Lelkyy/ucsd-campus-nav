@@ -7,6 +7,7 @@ import {
   toClassMeetings,
   type ClassMeeting,
   type CourseSections,
+  type LngLat,
   type Route,
   type SectionChoice,
   type SectionMeeting,
@@ -32,6 +33,11 @@ interface Props {
   onDirections: (meeting: ClassMeeting, opts?: DirectionsOptions) => void;
   /** The day view's walks and classes, for the map. */
   onDayOverlay?: (overlay: DayOverlay | null) => void;
+  /** Your saved home, the trips to and from it, and setting it. */
+  home?: LngLat | null;
+  estimateHome?: (buildingId: string, dir: "to" | "from", at: Date) => Route | null;
+  onDirectionsHome?: (meeting: ClassMeeting, leaveAt: Date) => void;
+  onSetHome?: () => void;
 }
 
 const SCHOOL_DAYS: Weekday[] = ["M", "Tu", "W", "Th", "F"];
@@ -99,7 +105,19 @@ export function NextUp({
 /** The student's schedule: the day's timetable, the week grid, or the course list to edit. */
 const NO_PLACES = new Map<string, never>();
 
-export function SchedulePanel({ data, schedule, view, onView, estimateBetween, onDirections, onDayOverlay }: Props) {
+export function SchedulePanel({
+  data,
+  schedule,
+  view,
+  onView,
+  estimateBetween,
+  onDirections,
+  onDayOverlay,
+  home,
+  estimateHome,
+  onDirectionsHome,
+  onSetHome,
+}: Props) {
   const { meetings } = schedule;
   // null: browsing; "" : adding a new course; a code: changing that course's section.
   const [adding, setAdding] = useState<string | null>(null);
@@ -187,6 +205,10 @@ export function SchedulePanel({ data, schedule, view, onView, estimateBetween, o
               estimateBetween={estimateBetween}
               onDirections={onDirections}
               onOverlay={onDayOverlay}
+              home={home}
+              estimateHome={estimateHome}
+              onDirectionsHome={onDirectionsHome}
+              onSetHome={onSetHome}
             />
           ) : view === "week" ? (
             <WeekView meetings={meetings} colorOf={colorOf} onPick={(m) => onDirections(m)} />

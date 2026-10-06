@@ -3,10 +3,8 @@ import { SatelliteIcon } from "./Icons.tsx";
 import type { BaseMap, CampusPlaces } from "./MapView.tsx";
 
 const BASE_MAPS: { id: BaseMap; label: string; note: string }[] = [
-  { id: "map", label: "Map", note: "Paths and buildings" },
-  { id: "illustrated", label: "Illustrated", note: "UCSD's drawn campus map" },
   { id: "campus", label: "Campus", note: "The official campus map" },
-  { id: "satellite", label: "Satellite", note: "Aerial photos" },
+  { id: "illustrated", label: "Illustrated", note: "UCSD's drawn campus map" },
 ];
 
 /** The map button: which map to draw under the routes, and which of UCSD's places to show. */

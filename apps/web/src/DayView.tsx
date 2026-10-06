@@ -15,7 +15,9 @@ import {
 } from "@campus/core";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { storage, type CampusData } from "./data.ts";
+import { HomeIcon } from "./Icons.tsx";
 import { formatDistance } from "./Itinerary.tsx";
+import { PALETTE } from "./palette.ts";
 import type { DayOverlay } from "./MapView.tsx";
 
 export interface DirectionsOptions {
@@ -23,6 +25,8 @@ export interface DirectionsOptions {
   date: Date;
   /** Start from this class's room instead of your location. */
   from?: ClassMeeting;
+  /** Start from your saved home. */
+  fromHome?: boolean;
 }
 
 interface Props {
@@ -34,6 +38,11 @@ interface Props {
   onDirections: (meeting: ClassMeeting, opts: DirectionsOptions) => void;
   /** The day's walks and classes, for the map (null when the view closes). */
   onOverlay?: (overlay: DayOverlay | null) => void;
+  /** Your saved home: the day starts and ends there. */
+  home?: LngLat | null;
+  estimateHome?: (buildingId: string, dir: "to" | "from", at: Date) => Route | null;
+  onDirectionsHome?: (meeting: ClassMeeting, leaveAt: Date) => void;
+  onSetHome?: () => void;
 }
 
 /** Which class you chose in each conflict, by day and the classes involved. */
@@ -46,7 +55,18 @@ const CHOICES_KEY = "campus-nav:conflict-choices";
  * are or from the class before. Classes that overlap are shown as a conflict
  * to choose from; the walks (drawn on the map too) follow your choice.
  */
-export function DayView({ data, meetings, colorOf, estimateBetween, onDirections, onOverlay }: Props) {
+export function DayView({
+  data,
+  meetings,
+  colorOf,
+  estimateBetween,
+  onDirections,
+  onOverlay,
+  home,
+  estimateHome,
+  onDirectionsHome,
+  onSetHome,
+}: Props) {
   const [day, setDay] = useState(() => startOfDay(new Date()));
   const [choices, setChoices] = useState<Record<string, string>>(() => storage.get(CHOICES_KEY, {}));
   const now = new Date();
@@ -85,6 +105,19 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
     [pickedKey, day, estimateBetween],
   );
 
+  // From home to the first class you're going to, and back home after the last.
+  const placed = picked.filter((c) => data.buildingById.has(c.meeting.buildingId));
+  const first = placed[0];
+  const last = placed[placed.length - 1];
+  const homeTrips = useMemo(() => {
+    if (!home || !estimateHome || !first || !last) return null;
+    return {
+      there: estimateHome(first.meeting.buildingId, "to", new Date(first.startsAt.getTime() - CLASS_BUFFER_MIN * 60_000)),
+      back: estimateHome(last.meeting.buildingId, "from", classEnd(last)),
+    };
+    // `first` and `last` come from the picked classes, which `pickedKey` stands for.
+  }, [pickedKey, day, home, estimateHome]);
+
   // The day on the map: a numbered pin per class you're going to, and the walks between them.
   useEffect(() => {
     if (!onOverlay) return;
@@ -102,8 +135,14 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
     const lines = legs.flatMap((l, i) =>
       l && !l.same && l.route ? [{ coordinates: l.route.coordinates, color: colorOf(picked[i].meeting.course) }] : [],
     );
+    // Home: a pin, the trip to the first class and the one back after the last.
+    if (home && stops.length) {
+      stops.push({ lngLat: home, n: "H", label: "Home", color: PALETTE.oliveDeep });
+      if (homeTrips?.there) lines.push({ coordinates: homeTrips.there.coordinates, color: PALETTE.oliveDeep });
+      if (homeTrips?.back) lines.push({ coordinates: homeTrips.back.coordinates, color: PALETTE.sage });
+    }
     onOverlay(stops.length ? { stops, lines } : null);
-  }, [legs, onOverlay]);
+  }, [legs, homeTrips, home, onOverlay]);
   useEffect(() => () => onOverlay?.(null), [onOverlay]);
 
   const shift = (days: number) => setDay((d) => addDays(d, days));
@@ -224,79 +263,150 @@ export function DayView({ data, meetings, colorOf, estimateBetween, onDirections
           )}
         </p>
       ) : (
-        <ol className="day-list">
-          {groups.map((g, gi) => {
-            const leg = legs[gi];
-            const chosen = picked[gi];
-            const b = data.buildingById.get(chosen.meeting.buildingId);
-            return (
-              <li key={g.map((c) => c.meeting.id).join("+")} className="day-item">
-                {leg && (
-                  <div className={`day-leg ${!leg.same && leg.route && leg.route.minutes + CLASS_BUFFER_MIN > leg.gapMin ? "tight" : ""}`}>
-                    <span className="day-leg-line" aria-hidden="true" />
-                    <span className="day-leg-text">
-                      {leg.same ? (
-                        <>Same building · {gapText(leg.gapMin)}</>
-                      ) : leg.route ? (
-                        <>
-                          {Math.ceil(leg.route.minutes)} min to {b?.name ?? "the next class"} ({formatDistance(leg.route.meters)}) ·{" "}
-                          {gapText(leg.gapMin)}
-                          {leg.route.minutes + CLASS_BUFFER_MIN > leg.gapMin && <strong> · tight, leave right away</strong>}
-                        </>
-                      ) : (
-                        <>{gapText(leg.gapMin)}</>
-                      )}
+        <>
+          {home && first ? (
+            <div className="day-home">
+              <span className="day-home-icon" aria-hidden="true">
+                <HomeIcon />
+              </span>
+              <span className="day-home-text">
+                {homeTrips?.there ? (
+                  <>
+                    <strong>Leave home by {clock(homeTrips.there.leaveAt)}</strong>
+                    <span className="muted small block">
+                      {tripText(homeTrips.there)} to {data.buildingById.get(first.meeting.buildingId)?.name}
                     </span>
-                    {!leg.same && b && (
-                      <button className="link" onClick={() => onDirections(chosen.meeting, { date: day, from: leg.prev.meeting })}>
-                        Directions from {leg.prev.meeting.course}
-                      </button>
-                    )}
-                  </div>
-                )}
-                {g.length === 1 ? (
-                  card(chosen, { primary: gi === 0 || !leg || leg.same })
+                  </>
                 ) : (
-                  <div
-                    className={`day-conflict ${roomSplit(g) ? "rooms" : ""}`}
-                    role="radiogroup"
-                    aria-label={`${roomSplit(g) ? "Exam rooms" : "Conflict"} at ${clock(g[0].startsAt)}: choose one`}
-                  >
-                    <div className="day-conflict-head">
-                      {roomSplit(g) ? (
-                        <>
-                          <strong>
-                            {g[0].meeting.course} {MEETING_TYPES[g[0].meeting.type ?? ""] ?? "exam"}
-                          </strong>{" "}
-                          is in {g.length} rooms · pick yours
-                        </>
-                      ) : (
-                        <>
-                          <strong>Overlap</strong> · {clock(g[0].startsAt)} –{" "}
-                          {clock(new Date(Math.max(...g.map((c) => classEnd(c).getTime()))))} · pick the one you're going to
-                        </>
+                  <>
+                    <strong>From home</strong>
+                    <span className="muted small block">No route found from home to {first.meeting.course}.</span>
+                  </>
+                )}
+              </span>
+              <button className="small-btn" onClick={() => onDirections(first.meeting, { date: day, fromHome: true })}>
+                Directions
+              </button>
+            </div>
+          ) : (
+            onSetHome && (
+              <p className="day-home-set muted small">
+                Plan the trip from home and back too.{" "}
+                <button className="link" onClick={onSetHome}>
+                  Set your home
+                </button>
+              </p>
+            )
+          )}
+          <ol className="day-list">
+            {groups.map((g, gi) => {
+              const leg = legs[gi];
+              const chosen = picked[gi];
+              const b = data.buildingById.get(chosen.meeting.buildingId);
+              return (
+                <li key={g.map((c) => c.meeting.id).join("+")} className="day-item">
+                  {leg && (
+                    <div
+                      className={`day-leg ${!leg.same && leg.route && leg.route.minutes + CLASS_BUFFER_MIN > leg.gapMin ? "tight" : ""}`}
+                    >
+                      <span className="day-leg-line" aria-hidden="true" />
+                      <span className="day-leg-text">
+                        {leg.same ? (
+                          <>Same building · {gapText(leg.gapMin)}</>
+                        ) : leg.route ? (
+                          <>
+                            {Math.ceil(leg.route.minutes)} min to {b?.name ?? "the next class"} ({formatDistance(leg.route.meters)}) ·{" "}
+                            {gapText(leg.gapMin)}
+                            {leg.route.minutes + CLASS_BUFFER_MIN > leg.gapMin && <strong> · tight, leave right away</strong>}
+                          </>
+                        ) : (
+                          <>{gapText(leg.gapMin)}</>
+                        )}
+                      </span>
+                      {!leg.same && b && (
+                        <button className="link" onClick={() => onDirections(chosen.meeting, { date: day, from: leg.prev.meeting })}>
+                          Directions from {leg.prev.meeting.course}
+                        </button>
                       )}
                     </div>
-                    {g.map((c) => (
-                      <div key={c.meeting.id}>
-                        {card(c, {
-                          primary: c === chosen,
-                          picked: c === chosen,
-                          skipped: c !== chosen,
-                          room: roomSplit(g),
-                          onPick: () => choose(g, c),
-                        })}
+                  )}
+                  {g.length === 1 ? (
+                    card(chosen, { primary: gi === 0 || !leg || leg.same })
+                  ) : (
+                    <div
+                      className={`day-conflict ${roomSplit(g) ? "rooms" : ""}`}
+                      role="radiogroup"
+                      aria-label={`${roomSplit(g) ? "Exam rooms" : "Conflict"} at ${clock(g[0].startsAt)}: choose one`}
+                    >
+                      <div className="day-conflict-head">
+                        {roomSplit(g) ? (
+                          <>
+                            <strong>
+                              {g[0].meeting.course} {MEETING_TYPES[g[0].meeting.type ?? ""] ?? "exam"}
+                            </strong>{" "}
+                            is in {g.length} rooms · pick yours
+                          </>
+                        ) : (
+                          <>
+                            <strong>Overlap</strong> · {clock(g[0].startsAt)} –{" "}
+                            {clock(new Date(Math.max(...g.map((c) => classEnd(c).getTime()))))} · pick the one you're going to
+                          </>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                      {g.map((c) => (
+                        <div key={c.meeting.id}>
+                          {card(c, {
+                            primary: c === chosen,
+                            picked: c === chosen,
+                            skipped: c !== chosen,
+                            room: roomSplit(g),
+                            onPick: () => choose(g, c),
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+          {home && last && (
+            <div className="day-home">
+              <span className="day-home-icon" aria-hidden="true">
+                <HomeIcon />
+              </span>
+              <span className="day-home-text">
+                {homeTrips?.back ? (
+                  <>
+                    <strong>Home by {clock(homeTrips.back.arriveAt)}</strong>
+                    <span className="muted small block">
+                      {tripText(homeTrips.back)} from {data.buildingById.get(last.meeting.buildingId)?.name} after {last.meeting.course}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <strong>Back home</strong>
+                    <span className="muted small block">No route found from {last.meeting.course} to home.</span>
+                  </>
                 )}
-              </li>
-            );
-          })}
-        </ol>
+              </span>
+              {onDirectionsHome && (
+                <button className="small-btn" onClick={() => onDirectionsHome(last.meeting, classEnd(last))}>
+                  Directions home
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
+}
+
+/** "18 min (0.9 mi)", or by shuttle: "25 min by shuttle or bus". */
+function tripText(r: Route): string {
+  const min = `${Math.ceil(r.minutes)} min`;
+  return r.usesTransit ? `${min} by shuttle or bus` : `${min} (${formatDistance(r.meters)})`;
 }
 
 /** One exam held in several rooms (split by last name or section): a choice, not a conflict. */
