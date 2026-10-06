@@ -215,9 +215,6 @@ The **Map** button picks one of two campus maps (kept in `localStorage`,
   buildings with a darker edge, clay for the track, in the app's palette, at
   every zoom (UCSD's tiles carry it from zoom 12).
   (Raising `raster-contrast` on the tiles only bleaches their light colors.)
-  OpenStreetMap's footpaths (`path` and `pedestrian`, not tunnels) go on top
-  from zoom 14 (faint until 15) for the small ones UCSD's layer leaves out: white with a soft
-  warm edge (`campus-paths`, `campus-paths-casing`).
 - **Illustrated:** UC San Diego's drawn campus map, the Concept3D tiles behind
   the old maps.ucsd.edu (`assets.concept3d.com/assets/1005/1005_Map_9`, TMS
   rows, zoom 13 to 20). Around it, where the drawing stops, OpenStreetMap is
@@ -230,11 +227,11 @@ The **Map** button picks one of two campus maps (kept in `localStorage`,
 
 In Campus mode the topographic map covers all of OpenStreetMap's drawing.
 
-On both, OpenStreetMap's streets and their names are drawn on top
-(`STREET_LAYERS`, under the app's own layers): light with a warm edge on the
-campus map, the drawing's gray (75% opaque) over the illustrated one, by street
-class, with service roads (parking aisles, driveways) only from zoom 16, and
-names along streets and named walks.
+On both, everywhere you can walk is drawn on top: every walkable edge of the
+routing graph (footpaths, sidewalks, bike paths, step-across links, connector
+roads; not bike-only roads), as white lines with a warm edge (`walkways`,
+`WALKWAY_LAYERS`), stairs dashed, a little softer over the drawing, under the
+app's own layers. No street names.
 
 **Places** come from the same campus map's "Campus Points Of Interest - Public"
 layer, grouped into nine categories in `scripts/fetch-campus-places.ts`
