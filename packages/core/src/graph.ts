@@ -146,6 +146,64 @@ export class CampusGraph {
     }
     return bestDist <= maxMeters ? best : -1;
   }
+
+  private longestEdge = -1;
+
+  /**
+   * The closest point to `p` on any edge that passes `usable` and joins nodes that
+   * pass `accept`: where a free point meets the network (the foot of the
+   * perpendicular onto the nearest path or road), not just its nearest node.
+   */
+  nearestEdgePoint(
+    p: LngLat,
+    opts: { accept?: (i: number) => boolean; usable?: (e: number) => boolean; maxMeters?: number } = {},
+  ): { edge: number; at: LngLat; meters: number } | null {
+    const { accept = this.onWalkNetwork, usable = () => true, maxMeters = 300 } = opts;
+    if (this.longestEdge < 0) this.longestEdge = this.edgeLength.reduce((m, l) => Math.max(m, l), 0);
+    // Flat metres around p, plenty accurate at these distances.
+    const mx = 111_320 * Math.cos((p[1] * Math.PI) / 180);
+    const my = 110_540;
+    const cx = Math.floor(p[0] / CELL_DEG);
+    const cy = Math.floor(p[1] / CELL_DEG);
+    const cellMeters = 45;
+    // An edge's nodes can be up to its length away from its closest point.
+    const reach = Math.min(maxMeters, 2000) + this.longestEdge;
+    const maxRing = Math.ceil(reach / cellMeters) + 1;
+    const seen = new Set<number>();
+    type Hit = { edge: number; at: LngLat; meters: number };
+    let best = null as Hit | null;
+    for (let r = 0; r <= maxRing; r++) {
+      for (let x = cx - r; x <= cx + r; x++) {
+        for (let y = cy - r; y <= cy + r; y++) {
+          if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) !== r) continue;
+          for (const i of this.grid.get(cellKey(x, y)) ?? []) {
+            if (!accept(i)) continue;
+            for (let k = this.adjStart[i]; k < this.adjStart[i + 1]; k++) {
+              const e = this.adjEdge[k];
+              if (seen.has(e)) continue;
+              seen.add(e);
+              const a = this.edgeFrom[e];
+              const b = this.edgeTo[e];
+              if (!usable(e) || !accept(a) || !accept(b)) continue;
+              const ax = (this.lon[a] - p[0]) * mx;
+              const ay = (this.lat[a] - p[1]) * my;
+              const bx = (this.lon[b] - p[0]) * mx;
+              const by = (this.lat[b] - p[1]) * my;
+              const len2 = (bx - ax) ** 2 + (by - ay) ** 2;
+              const t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * (bx - ax) + ay * (by - ay)) / len2)) : 0;
+              const px = ax + t * (bx - ax);
+              const py = ay + t * (by - ay);
+              const d = Math.hypot(px, py);
+              if (!best || d < best.meters) best = { edge: e, at: [p[0] + px / mx, p[1] + py / my], meters: d };
+            }
+          }
+        }
+      }
+      // Anything in ring r+1 is at least r cells away, and its edges reach at most longestEdge back.
+      if (best && r * cellMeters > best.meters + this.longestEdge) break;
+    }
+    return best && best.meters <= maxMeters ? best : null;
+  }
 }
 
 function cellKey(x: number, y: number): string {

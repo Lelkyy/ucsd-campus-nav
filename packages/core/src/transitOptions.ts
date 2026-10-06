@@ -1,5 +1,5 @@
 import type { CampusGraph } from "./graph.ts";
-import { resolveTrip, type Endpoint } from "./plan.ts";
+import { approachCosts, attachEnds, resolveTrip, type Endpoint } from "./plan.ts";
 import { PROFILES, findRoute, findRouteArriveBy, type BusLeg, type Route, type RouteOptions } from "./route.ts";
 import type { TransitNetwork } from "./transit.ts";
 import type { LngLat } from "./types.ts";
@@ -60,14 +60,18 @@ export function transitOptions(
   const arriveBy = opts.timing.arriveBy;
   const departAt = opts.timing.departAt ?? new Date();
 
+  // A free start or end can go either way along the path it joins.
+  const costs = approachCosts(graph, trip.ends, profile);
   const run = (variant: (typeof VARIANTS)[number], at: Date, mode: "depart" | "arrive") =>
     mode === "arrive"
-      ? findRouteArriveBy(graph, trip.start, trip.targets, at, { profile, transit: opts.transit, ...variant })
-      : findRoute(graph, trip.start, trip.targets, { profile, transit: opts.transit, departAt: at, ...variant });
+      ? findRouteArriveBy(graph, trip.start, trip.targets, at, { profile, transit: opts.transit, ...costs, ...variant })
+      : findRoute(graph, trip.start, trip.targets, { profile, transit: opts.transit, departAt: at, ...costs, ...variant });
 
   const found: TransitOption[] = [];
-  const add = (route: Route | null, alternateTime = false) => {
-    if (!route) return;
+  const add = (raw: Route | null, alternateTime = false) => {
+    if (!raw) return;
+    // Out to where free points actually meet the network.
+    const route = attachEnds(graph, raw, trip.ends, profile);
     const option = describe(route, alternateTime);
     if (!found.some((o) => key(o) === key(option))) found.push(option);
   };
@@ -76,8 +80,8 @@ export function transitOptions(
 
   // Walking, for comparison (Google lists it among transit options when it's competitive).
   const walk = arriveBy
-    ? findRouteArriveBy(graph, trip.start, trip.targets, arriveBy, { profile })
-    : findRoute(graph, trip.start, trip.targets, { profile, departAt });
+    ? findRouteArriveBy(graph, trip.start, trip.targets, arriveBy, { profile, ...costs })
+    : findRoute(graph, trip.start, trip.targets, { profile, departAt, ...costs });
   add(walk);
 
   // Next departures of the fastest transit route (or earlier ones, arriving by a time).

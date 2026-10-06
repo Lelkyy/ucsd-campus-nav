@@ -185,6 +185,16 @@ Fraunces for a few headings. The logo files are in `apps/web/public/`
 
 The map shows only the stops a route boards or leaves at.
 
+## Off the paths
+
+A start or end that isn't on a path (your location, a dropped pin) joins the
+network at the closest point on the nearest usable path or road
+(`CampusGraph.nearestEdgePoint`), not its nearest node, so the dotted line is
+the short way onto it. The router may then go either way along that edge: it
+gets the time from that point to each end (`approachCosts` -> `startCost` /
+`targetCost`), and the route is extended to the exact point (`attachEnds`), its
+distance and time included.
+
 ## Your location
 
 When the browser already allows location (`navigator.permissions`), the app

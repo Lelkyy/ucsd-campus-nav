@@ -112,6 +112,12 @@ export interface RouteOptions {
   walkWeight?: number;
   /** Perceived cost of each boarding in seconds (default 60). Higher = fewer transfers. */
   boardPenalty?: number;
+  /**
+   * Seconds of travel (preferences included) to reach each start node / to go on from
+   * each target node: a free point that joins a path mid-way can go either way along it.
+   */
+  startCost?: ReadonlyMap<number, number>;
+  targetCost?: ReadonlyMap<number, number>;
 }
 
 /** A stretch on foot or by bike. */
@@ -226,19 +232,28 @@ export function findRoute(
   };
 
   for (const s of starts) {
-    cost[s] = 0;
+    const c0 = (opts.startCost?.get(s) ?? 0) * walkWeight;
+    if (c0 >= cost[s]) continue;
+    cost[s] = c0;
     clock[s] = 0;
-    open.push(s, heuristic(s));
+    open.push(s, c0 + heuristic(s));
   }
 
+  // The best target so far, counting what's left from it; done once nothing open can beat it.
   let reached = -1;
+  let bestTotal = Infinity;
   while (open.size > 0) {
     const u = open.pop();
     if (closed[u]) continue;
+    if (cost[u] + heuristic(u) >= bestTotal) break;
     closed[u] = 1;
     if (targetSet.has(u)) {
-      reached = u;
-      break;
+      const total = cost[u] + (opts.targetCost?.get(u) ?? 0) * walkWeight;
+      if (total < bestTotal) {
+        bestTotal = total;
+        reached = u;
+      }
+      if (!opts.targetCost) break;
     }
 
     if (u < n) {
@@ -417,7 +432,12 @@ export function findRouteArriveBy(
   arriveBy: Date,
   opts: Omit<RouteOptions, "departAt"> = {},
 ): Route | null {
-  const walkOnly = findRoute(graph, start, targets, { profile: opts.profile, departAt: arriveBy });
+  const walkOnly = findRoute(graph, start, targets, {
+    profile: opts.profile,
+    departAt: arriveBy,
+    startCost: opts.startCost,
+    targetCost: opts.targetCost,
+  });
   const shiftTo = (r: Route, leave: Date): Route => {
     const dt = leave.getTime() - r.leaveAt.getTime();
     return { ...r, leaveAt: leave, arriveAt: new Date(r.arriveAt.getTime() + dt) };

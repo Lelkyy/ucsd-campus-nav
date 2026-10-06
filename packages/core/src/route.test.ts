@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { distanceMeters } from "./geo.ts";
 import { CampusGraph } from "./graph.ts";
 import { PROFILES, findRoute, findRouteArriveBy } from "./route.ts";
 import { dayClasses, defaultPick, groupOverlaps, nextClass, startOn, type ClassMeeting } from "./schedule.ts";
 import { formatCourseCode, searchCourses, sectionChoices, type CourseSections, type SectionsData } from "./sections.ts";
 import { TransitNetwork, type TransitData } from "./transit.ts";
-import { checkBusRoute } from "./plan.ts";
+import { checkBusRoute, planRoute } from "./plan.ts";
 import { transitOptions } from "./transitOptions.ts";
 import { EdgeKind, type Building, type GraphData, type IndoorData, type LngLat } from "./types.ts";
 
@@ -26,6 +27,33 @@ const tiny: GraphData = {
   bikeComponents: [0, 0, 0, 0],
   mainBikeComponent: 0,
 };
+
+describe("free points", () => {
+  // One straight path, ~1.1 km north-south, with nodes only at its ends.
+  const line = new CampusGraph({
+    ...tiny,
+    coords: [0, 0, 0, 0.01],
+    edges: [0, 1, EdgeKind.Path],
+    components: [0, 0],
+    bikeComponents: [0, 0],
+  });
+
+  it("join the nearest path at its closest point, not its nearest node", () => {
+    // ~11 m east of the path's middle, ~550 m from either end.
+    const p = planRoute(line, { kind: "point", lngLat: [0.0001, 0.005], label: "Here" }, { kind: "point", lngLat: [0, 0.01], label: "End" }, { profile: PROFILES.walk });
+    expect(p.ok).toBe(true);
+    if (!p.ok) return;
+    // The dotted line is the short perpendicular to the path...
+    const [from, to] = p.connectors[0];
+    expect(distanceMeters(from, to)).toBeLessThan(12);
+    expect(to[0]).toBeCloseTo(0, 6);
+    expect(to[1]).toBeCloseTo(0.005, 4);
+    // ...and the route runs along the path from there: about half its length, not all of it.
+    expect(p.route.meters).toBeGreaterThan(540);
+    expect(p.route.meters).toBeLessThan(570);
+    expect(p.route.coordinates[0][1]).toBeCloseTo(0.005, 4);
+  });
+});
 
 describe("findRoute (walking)", () => {
   const g = new CampusGraph(tiny);

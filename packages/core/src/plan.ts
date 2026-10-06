@@ -44,21 +44,36 @@ export type Plan =
     }
   | { ok: false; error: string };
 
+/** Where a free point meets the network: the closest point on an edge (routes start or end there). */
+export interface Approach {
+  at: LngLat;
+  edge: number;
+}
+
 export type ResolvedTrip =
-  | { ok: true; start: number[]; targets: number[]; connectors: [LngLat, LngLat][] }
+  | {
+      ok: true;
+      start: number[];
+      targets: number[];
+      connectors: [LngLat, LngLat][];
+      /** For free points: where they meet the network, so the route can run to that exact spot. */
+      ends: { start?: Approach; end?: Approach };
+    }
   | { ok: false; error: string };
 
 /** Graph nodes a trip can start and end at for a given way of travelling. */
 export function resolveTrip(graph: CampusGraph, from: Endpoint, to: Endpoint, profile: Profile): ResolvedTrip {
   const connectors: [LngLat, LngLat][] = [];
+  const ends: { start?: Approach; end?: Approach } = {};
   const accept = profile.travel === "bike" ? graph.onBikeNetwork : graph.onWalkNetwork;
+  const usable = (e: number) => profile.speed[graph.kind(e)] > 0;
   const stepFree = profile.speed[EdgeKind.Steps] === 0;
-  const targets = endpointNodes(graph, to, connectors, false, accept, stepFree);
+  const targets = endpointNodes(graph, to, connectors, false, accept, usable, stepFree, (a) => (ends.end = a));
   if (targets.length === 0) return { ok: false, error: "Destination is too far from any mapped path." };
   // From a building, the router may leave through any of its exits and picks the best.
-  const start = endpointNodes(graph, from, connectors, true, accept, stepFree);
+  const start = endpointNodes(graph, from, connectors, true, accept, usable, stepFree, (a) => (ends.start = a));
   if (start.length === 0) return { ok: false, error: "Start is too far from any mapped path." };
-  return { ok: true, start, targets, connectors };
+  return { ok: true, start, targets, connectors, ends };
 }
 
 /** Route between two endpoints, snapping free points onto the path network. */
@@ -67,9 +82,11 @@ export function planRoute(graph: CampusGraph, from: Endpoint, to: Endpoint, opts
   if (!trip.ok) return trip;
   const { start, targets, connectors } = trip;
 
-  const route = opts.arriveBy
-    ? findRouteArriveBy(graph, start, targets, opts.arriveBy, opts)
-    : findRoute(graph, start, targets, opts);
+  const costs = approachCosts(graph, trip.ends, opts.profile);
+  const found = opts.arriveBy
+    ? findRouteArriveBy(graph, start, targets, opts.arriveBy, { ...opts, ...costs })
+    : findRoute(graph, start, targets, { ...opts, ...costs });
+  const route = found && attachEnds(graph, found, trip.ends, opts.profile);
   if (!route) {
     const needsShuttle = !opts.transit && to.kind === "building" && to.building.access === "shuttle";
     return {
@@ -90,7 +107,9 @@ function endpointNodes(
   connectors: [LngLat, LngLat][],
   isStart: boolean,
   accept: (i: number) => boolean,
+  usable: (e: number) => boolean,
   stepFree: boolean,
+  onApproach: (a: Approach) => void,
 ): number[] {
   if (e.kind === "building") {
     return entranceTargets(e.building, (n) => graph.coord(n), { stepFree, roomAt: isStart ? undefined : e.roomAt });
@@ -99,13 +118,75 @@ function endpointNodes(
     const nodes = e.place.points.map((p) => graph.nearestNode(p, { maxMeters: 300, accept })).filter((n) => n !== -1);
     return [...new Set(nodes)];
   }
-  const node = graph.nearestNode(e.lngLat, { maxMeters: 300, accept });
-  if (node === -1) return [];
-  const snapped = graph.coord(node);
-  if (distanceMeters(snapped, e.lngLat) > 1) {
-    connectors.push(isStart ? [e.lngLat, snapped] : [snapped, e.lngLat]);
-  }
-  return [node];
+  // A free point joins the nearest path or road at its closest point (a short, straight dotted
+  // line), and the route runs along that edge from there, whichever way is better.
+  const hit = graph.nearestEdgePoint(e.lngLat, { maxMeters: 300, accept, usable });
+  if (!hit) return [];
+  if (hit.meters > 1) connectors.push(isStart ? [e.lngLat, hit.at] : [hit.at, e.lngLat]);
+  onApproach({ at: hit.at, edge: hit.edge });
+  return [graph.edgeFrom[hit.edge], graph.edgeTo[hit.edge]];
+}
+
+/** For the router: how long from where each free end meets its path to either end of that path. */
+export function approachCosts(
+  graph: CampusGraph,
+  ends: { start?: Approach; end?: Approach },
+  profile: Profile,
+): { startCost?: Map<number, number>; targetCost?: Map<number, number> } {
+  const costs = (a?: Approach) => {
+    if (!a) return undefined;
+    const kind = graph.kind(a.edge);
+    const speed = profile.speed[kind] || profile.speed[EdgeKind.Path];
+    const prefer = profile.prefer?.[kind] ?? 1;
+    const map = new Map<number, number>();
+    for (const node of [graph.edgeFrom[a.edge], graph.edgeTo[a.edge]]) {
+      map.set(node, (distanceMeters(a.at, graph.coord(node)) / speed) * prefer);
+    }
+    return map;
+  };
+  return { startCost: costs(ends.start), targetCost: costs(ends.end) };
+}
+
+/**
+ * Extend a route found between nodes to where its free ends actually meet the
+ * network: from the closest point on the start's edge to the node the route
+ * leaves from, and from its last node to the end's closest point.
+ */
+export function attachEnds(graph: CampusGraph, route: Route, ends: { start?: Approach; end?: Approach }, profile: Profile): Route {
+  const legs = route.legs.slice();
+  let coordinates = route.coordinates;
+  let meters = route.meters;
+  let startSec = 0;
+  let endSec = 0;
+  const extend = (approach: Approach | undefined, legIndex: number, atStart: boolean) => {
+    const leg = legs[legIndex];
+    if (!approach || !leg || leg.mode === "bus" || !leg.nodes.length) return;
+    const node = atStart ? leg.nodes[0] : leg.nodes[leg.nodes.length - 1];
+    if (node !== graph.edgeFrom[approach.edge] && node !== graph.edgeTo[approach.edge]) return;
+    const d = distanceMeters(approach.at, graph.coord(node));
+    if (d < 0.5) return;
+    const speed = profile.speed[graph.kind(approach.edge)] || profile.speed[EdgeKind.Path];
+    const sec = d / speed;
+    legs[legIndex] = atStart
+      ? { ...leg, coordinates: [approach.at, ...leg.coordinates], nodes: [-1, ...leg.nodes], edges: [-1, ...leg.edges], meters: leg.meters + d, seconds: leg.seconds + sec }
+      : { ...leg, coordinates: [...leg.coordinates, approach.at], nodes: [...leg.nodes, -1], edges: [...leg.edges, -1], meters: leg.meters + d, seconds: leg.seconds + sec };
+    coordinates = atStart ? [approach.at, ...coordinates] : [...coordinates, approach.at];
+    meters += d;
+    if (atStart) startSec = sec;
+    else endSec = sec;
+  };
+  extend(ends.start, 0, true);
+  extend(ends.end, legs.length - 1, false);
+  if (!startSec && !endSec) return route;
+  return {
+    ...route,
+    legs,
+    coordinates,
+    meters,
+    minutes: route.minutes + (startSec + endSec) / 60,
+    leaveAt: new Date(route.leaveAt.getTime() - startSec * 1000),
+    arriveAt: new Date(route.arriveAt.getTime() + endSec * 1000),
+  };
 }
 
 /** When a transit trip is worth offering instead of walking. */
