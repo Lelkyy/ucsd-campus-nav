@@ -182,6 +182,9 @@ The **Map** button picks one of two campus maps (kept in `localStorage`,
   The tiles are pale, so they're drawn with stronger color
   (`raster-saturation`) and whites toned down a little; raising
   `raster-contrast` instead bleaches the light colors to white.
+  Its tiles leave out most footpaths, so OpenStreetMap's paths (`path` and
+  `pedestrian`, not tunnels) are drawn on top from zoom 15: white with a soft
+  purple edge (`campus-paths`, `campus-paths-casing`).
 - **Illustrated:** UC San Diego's drawn campus map, the Concept3D tiles behind
   the old maps.ucsd.edu (`assets.concept3d.com/assets/1005/1005_Map_9`, TMS
   rows, zoom 13 to 20). Around it, where the drawing stops, OpenStreetMap is

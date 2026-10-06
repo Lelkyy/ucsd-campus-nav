@@ -162,6 +162,27 @@ export function MapView(props: MapViewProps) {
         source: "topo",
         paint: { "raster-saturation": 0.7, "raster-brightness-max": 0.93 },
       });
+      // The campus map leaves out most footpaths: OpenStreetMap's, on top of it, white with a soft edge.
+      for (const [id, color, width] of [
+        ["campus-paths-casing", "#b9a8c8", [15, 2.2, 17, 4, 20, 11]],
+        ["campus-paths", "#ffffff", [15, 1, 17, 2.2, 20, 7]],
+      ] as const) {
+        map.addLayer({
+          id,
+          type: "line",
+          source: "openmaptiles",
+          "source-layer": "transportation",
+          minzoom: 15,
+          filter: [
+            "all",
+            ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
+            ["!=", ["get", "brunnel"], "tunnel"],
+            ["match", ["get", "class"], ["path", "pedestrian"], true, false],
+          ],
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: { "line-color": color, "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], ...width] },
+        });
+      }
       map.addSource("illustrated", {
         type: "raster",
         tiles: [ILLUSTRATED_TILES],
@@ -368,6 +389,8 @@ export function MapView(props: MapViewProps) {
     // Campus: the topographic campus map over everything of OpenStreetMap's. Illustrated: the drawing,
     // on OpenStreetMap drawn in its colors.
     map.setLayoutProperty("topo", "visibility", vis(!illustrated));
+    map.setLayoutProperty("campus-paths-casing", "visibility", vis(!illustrated));
+    map.setLayoutProperty("campus-paths", "visibility", vis(!illustrated));
     map.setLayoutProperty("illustrated", "visibility", vis(illustrated));
     for (const { id, type } of osmLayers.current) {
       if (type !== "background") map.setLayoutProperty(id, "visibility", vis(illustrated && showsUnderDrawing(id, type)));
