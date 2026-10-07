@@ -24,9 +24,17 @@ export interface Profile {
   againstOneway?: Partial<Record<EdgeKind, number>>;
   /** Riding only: preference on a road with a bike lane in your direction (instead of the road's). */
   inBikeLane?: number;
-  /** Walking: speeds are for level ground and change with the slope (`hillFactor`). */
+  /** Speeds are for level ground and change with the slope (walking: `hillFactor`; riding: `rideFactor`). */
   hills?: boolean;
 }
+
+const WALK = WALKING_SPEED_MPS;
+/** Typical relaxed campus cycling speed (~18 km/h). */
+const RIDE = 5;
+/** Riding slowly among pedestrians on shared paths. */
+const RIDE_SHARED = 3.5;
+/** Walking a bike where riding isn't allowed. */
+const PUSH = 1.2;
 
 /** Slopes steeper than this (a 35% grade) are taken as this steep: steeper is elevation noise. */
 const MAX_GRADE = 0.35;
@@ -54,19 +62,69 @@ export function edgeGrade(graph: CampusGraph, e: number, from: number): number {
  * Speed and preference for travelling edge `e` from node `from`. Riders keep right: one-ways
  * only with the traffic, and a road's bike lane only in the direction it serves.
  */
-export function edgeTravel(graph: CampusGraph, profile: Profile, e: number, from: number): { speed: number; prefer: number } {
+export function edgeTravel(
+  graph: CampusGraph,
+  profile: Profile,
+  e: number,
+  from: number,
+): { speed: number; prefer: number; push: boolean } {
   const kind = graph.kind(e);
-  const prefer = profile.prefer?.[kind] ?? 1;
-  if (profile.travel !== "bike") {
-    // Stairs have their own speed; everything else goes slower uphill.
-    const hill = profile.hills && kind !== EdgeKind.Steps ? hillFactor(edgeGrade(graph, e, from)) : 1;
-    return { speed: profile.speed[kind] * hill, prefer };
-  }
+  let prefer = profile.prefer?.[kind] ?? 1;
+  // Stairs have their own speed; everything else changes with the slope.
+  const grade = profile.hills && kind !== EdgeKind.Steps ? edgeGrade(graph, e, from) : 0;
+  if (profile.travel !== "bike") return { speed: profile.speed[kind] * hillFactor(grade), prefer, push: false };
   const dir = graph.edgeBikeDir[e];
   const forward = graph.edgeFrom[e] === from;
-  if (dir & (forward ? BikeDir.NoForward : BikeDir.NoBackward)) return { speed: profile.againstOneway?.[kind] ?? 0, prefer: 1 };
-  if (dir & (forward ? BikeDir.LaneForward : BikeDir.LaneBackward)) return { speed: profile.speed[kind], prefer: profile.inBikeLane ?? prefer };
-  return { speed: profile.speed[kind], prefer };
+  let speed = profile.speed[kind];
+  if (dir & (forward ? BikeDir.NoForward : BikeDir.NoBackward)) [speed, prefer] = [profile.againstOneway?.[kind] ?? 0, 1];
+  else if (dir & (forward ? BikeDir.LaneForward : BikeDir.LaneBackward)) prefer = profile.inBikeLane ?? prefer;
+  if (!speed) return { speed: 0, prefer, push: false };
+  // Walking the bike (footpaths, the wrong way down a one-way, stairs): at walking pace for the slope.
+  if (speed < PUSH_THRESHOLD) return { speed: speed * hillFactor(grade), prefer, push: true };
+  // Riding, unless the climb is too steep to ride (too slow to keep your balance; ~12% and up)
+  // or walking the bike would be quicker.
+  const ride = speed * rideFactor(grade);
+  const walk = PUSH * hillFactor(grade);
+  return ride >= Math.max(walk, MIN_RIDE) ? { speed: ride, prefer, push: false } : { speed: walk, prefer, push: true };
+}
+
+// A casual rider on a slope: rider and bike 85 kg, rolling resistance 0.008, drag area 0.5 m²,
+// putting out enough on the level for RIDE (~70 W), up to 150 W on a climb, easing off downhill
+// (coasting from 3% down), and braking to stay under 7 m/s (~25 km/h).
+const RIDER_KG = 85;
+const ROLLING = 0.008;
+const DRAG_AREA = 0.5;
+const AIR = 1.2;
+const CLIMB_WATTS = 150;
+const DOWNHILL_MAX = 7;
+/** Slower than this (~5 km/h) a bike is hard to keep upright: get off and walk it. */
+const MIN_RIDE = 1.5;
+const rideForce = (grade: number, v: number) =>
+  RIDER_KG * 9.81 * (Math.sin(Math.atan(grade)) + ROLLING * Math.cos(Math.atan(grade))) + 0.5 * AIR * DRAG_AREA * v * v;
+const LEVEL_WATTS = rideForce(0, RIDE) * RIDE;
+/** Riding speed (m/s) on a grade: the speed where the rider's power meets gravity, rolling and air. */
+function rideSpeed(grade: number): number {
+  const watts =
+    grade >= 0
+      ? LEVEL_WATTS + (CLIMB_WATTS - LEVEL_WATTS) * Math.min(1, grade / 0.03)
+      : LEVEL_WATTS * Math.max(0, 1 + grade / 0.03);
+  let [lo, hi] = [0.05, 30];
+  for (let k = 0; k < 40; k++) {
+    const v = (lo + hi) / 2;
+    if (rideForce(grade, v) * v > watts) hi = v;
+    else lo = v;
+  }
+  return Math.min(DOWNHILL_MAX, lo);
+}
+// Speeds by grade, every half a percent from -35% to +35%, relative to the level.
+const RIDE_TABLE = Array.from({ length: 141 }, (_, k) => rideSpeed(-MAX_GRADE + k * 0.005) / rideSpeed(0));
+/** The most `rideFactor` can speed you up (the downhill limit). */
+const MAX_RIDE_FACTOR = Math.max(...RIDE_TABLE);
+/** Riding speed on a slope relative to level ground: ~0.6x up 5%, ~0.33x up 10%, up to 1.4x downhill. */
+export function rideFactor(grade: number): number {
+  const x = (Math.max(-MAX_GRADE, Math.min(MAX_GRADE, grade)) + MAX_GRADE) / 0.005;
+  const k = Math.min(RIDE_TABLE.length - 2, Math.floor(x));
+  return RIDE_TABLE[k] + (RIDE_TABLE[k + 1] - RIDE_TABLE[k]) * (x - k);
 }
 
 /** Road kinds a rider shares with traffic (drawn on the right-hand side of the road). */
@@ -81,21 +139,13 @@ export function rideRuns(graph: CampusGraph, profile: Profile, leg: MoveLeg): { 
   for (let k = 0; k + 1 < leg.coordinates.length; k++) {
     const e = leg.edges[k];
     const keepRight =
-      e >= 0 && ROAD_KINDS.has(graph.kind(e)) && edgeTravel(graph, profile, e, leg.nodes[k]).speed >= PUSH_THRESHOLD;
+      e >= 0 && ROAD_KINDS.has(graph.kind(e)) && !edgeTravel(graph, profile, e, leg.nodes[k]).push;
     const run = runs[runs.length - 1];
     if (run && run.keepRight === keepRight) run.coordinates.push(leg.coordinates[k + 1]);
     else runs.push({ coordinates: [leg.coordinates[k], leg.coordinates[k + 1]], keepRight });
   }
   return runs;
 }
-
-const WALK = WALKING_SPEED_MPS;
-/** Typical relaxed campus cycling speed (~18 km/h). */
-const RIDE = 5;
-/** Riding slowly among pedestrians on shared paths. */
-const RIDE_SHARED = 3.5;
-/** Walking a bike where riding isn't allowed. */
-const PUSH = 1.2;
 
 const WALK_PREFER = { [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Lot]: 1.1, [EdgeKind.Bike]: 1.5, [EdgeKind.Road]: 10, [EdgeKind.Gap]: 1.25 };
 
@@ -152,6 +202,7 @@ export const PROFILES = {
     id: "bike",
     label: "Bike",
     travel: "bike",
+    hills: true,
     speed: {
       [EdgeKind.Bike]: RIDE,
       [EdgeKind.Road]: RIDE,
@@ -327,7 +378,7 @@ function search(graph: CampusGraph, start: number | number[], targets: number[],
   const tLat = targets.map((t) => graph.lat[t]);
   const fastest = transit
     ? MAX_TRANSIT_SPEED_MPS
-    : Math.max(...Object.values(profile.speed)) * (profile.hills ? MAX_HILL_FACTOR : 1);
+    : Math.max(...Object.values(profile.speed)) * (!profile.hills ? 1 : profile.travel === "bike" ? MAX_RIDE_FACTOR : MAX_HILL_FACTOR);
   const heuristic = (i: number) => {
     const [lon, lat] = pos(i);
     let best = Infinity;
@@ -476,11 +527,11 @@ function buildRoute(
       if (step.kind === "edge") {
         const kind = graph.kind(step.edge);
         const meters = graph.edgeLength[step.edge];
-        const { speed } = edgeTravel(graph, profile, step.edge, last);
+        const { speed, push } = edgeTravel(graph, profile, step.edge, last);
         move.meters += meters;
         move.seconds += meters / speed;
         move.stairSegments += kind === EdgeKind.Steps ? 1 : 0;
-        if (profile.travel === "bike" && speed < PUSH_THRESHOLD) move.pushMeters += meters;
+        if (profile.travel === "bike" && push) move.pushMeters += meters;
         move.edges.push(step.edge);
       } else {
         move.edges.push(-1);

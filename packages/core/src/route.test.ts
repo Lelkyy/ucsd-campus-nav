@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { distanceMeters } from "./geo.ts";
 import { CampusGraph } from "./graph.ts";
-import { PROFILES, findRoute, findRouteArriveBy, hillFactor, rideRuns, usesGap, type MoveLeg, type Route } from "./route.ts";
+import { PROFILES, findRoute, findRouteArriveBy, hillFactor, rideFactor, rideRuns, usesGap, type MoveLeg, type Route } from "./route.ts";
 import { dayClasses, defaultPick, groupOverlaps, nextClass, startOn, type ClassMeeting } from "./schedule.ts";
 import { formatCourseCode, searchCourses, sectionChoices, type CourseSections, type SectionsData } from "./sections.ts";
 import { TransitNetwork, type TransitData } from "./transit.ts";
@@ -99,6 +99,23 @@ describe("hills", () => {
     expect(hillFactor(-0.05)).toBeGreaterThan(1.18);
     expect(hillFactor(0)).toBe(1);
     expect(hillFactor(0.05)).toBeCloseTo(0.84, 2);
+  });
+
+  it("rides slower uphill and faster down, and walks the bike up a climb too steep to ride", () => {
+    const ride = (g: CampusGraph, from: number, to: number) => findRoute(g, from, [to], { profile: PROFILES.bike })!.legs[0] as MoveLeg;
+    // A ~111 m road climbing at a 5% grade, and one at 20%.
+    const road = (rise: number) =>
+      new CampusGraph({ ...tiny, coords: [0, 0, 0, 0.001], edges: [0, 1, EdgeKind.BikeOnly], components: [0, 0], bikeComponents: [0, 0], elevation: [0, rise] });
+    const level = ride(road(0), 0, 1).seconds;
+    expect(level).toBeCloseTo(111 / 5, 0);
+    const gentle = road(55); // 5.5 m up
+    expect(ride(gentle, 0, 1).seconds / level).toBeGreaterThan(1.5);
+    expect(ride(gentle, 1, 0).seconds / level).toBeLessThan(0.8);
+    expect(ride(gentle, 0, 1).pushMeters).toBe(0);
+    // 20% up: quicker to get off and walk.
+    const steep = ride(road(222), 0, 1);
+    expect(steep.pushMeters).toBeGreaterThan(100);
+    expect(rideFactor(0)).toBe(1);
   });
 
   it("counts bridges, tunnels and floors as level", () => {

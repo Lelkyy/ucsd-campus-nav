@@ -47,6 +47,14 @@ data/private/* (TSS) ──────┘                               ▼
     decimeters). Bridges, tunnels and indoor floors are `NO_ELEVATION` and count
     as level. Against Google's walking times for five campus trips, four now land
     within a minute (they were 0.7-2.2 min off).
+    **Riding** (`rideFactor`) uses a simple model of a casual rider: rider and bike
+    85 kg, rolling and air resistance, about 70 W on the level (the usual 5 m/s),
+    up to 150 W on a climb, easing off downhill and braking to stay under 7 m/s
+    (25 km/h). That gives 15 km/h up 2%, 11 km/h up 5%, 6 km/h up 10% and 25 km/h
+    down. Below 1.5 m/s (about a 12% climb) you get off and walk the bike at
+    walking pace for the slope, counted as walking the bike. Scripps to Price
+    Center (110 m up) takes 17 min by bike and 10 min the other way; across 300
+    random campus trips, riding times went up 7% at the median.
   - `schedule.ts`: meetings (weekly or one-off, like exams) and "next class".
   - `sections.ts`: course sections from the schedule, grouped into choices
     (lecture group + one discussion/lab), and course search.
