@@ -47,6 +47,7 @@ the way, using the paths, stairs and bike paths students actually use.
   paths unless they save real time, and never follow a road with no sidewalk
   unless it's the only way there. Where two paths come close, a walk can cut
   across the lawn between them, but only when that saves a real part of the trip.
+  Parking lots can be walked anywhere.
 - **Two campus maps:** the official campus map (district names and campus
   boundary) or UC San Diego's illustrated one, with routes and paths drawn on
   top.

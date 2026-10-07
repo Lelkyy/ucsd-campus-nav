@@ -69,7 +69,7 @@ const RIDE_SHARED = 3.5;
 /** Walking a bike where riding isn't allowed. */
 const PUSH = 1.2;
 
-const WALK_PREFER = { [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Bike]: 1.5, [EdgeKind.Road]: 10, [EdgeKind.Gap]: 1.25 };
+const WALK_PREFER = { [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Lot]: 1.1, [EdgeKind.Bike]: 1.5, [EdgeKind.Road]: 10, [EdgeKind.Gap]: 1.25 };
 
 /**
  * Cutting across open ground between paths (EdgeKind.Gap) has to be worth it for the trip as a
@@ -93,6 +93,7 @@ export const PROFILES = {
       [EdgeKind.Steps]: WALK / 1.4,
       [EdgeKind.BikeOnly]: 0,
       [EdgeKind.Gap]: WALK,
+      [EdgeKind.Lot]: WALK,
     },
     // Prefer footpaths, then sidewalks along roads. Bike paths only for a real time saving
     // (a third or more on that stretch); a road with no sidewalk only when nothing else goes there.
@@ -111,8 +112,9 @@ export const PROFILES = {
       [EdgeKind.Sidewalk]: WALK,
       [EdgeKind.Steps]: 0,
       [EdgeKind.BikeOnly]: 0,
-      // Lawns and fields aren't step-free ground.
+      // Lawns and fields aren't step-free ground; parking lots are.
       [EdgeKind.Gap]: 0,
+      [EdgeKind.Lot]: WALK,
     },
     prefer: WALK_PREFER,
   },
@@ -131,8 +133,9 @@ export const PROFILES = {
       [EdgeKind.Custom]: PUSH,
       // Carrying a bike up or down stairs: possible, but only as a last resort.
       [EdgeKind.Steps]: 0.4,
-      // Cutting across the grass is for walkers.
+      // Cutting across the grass is for walkers; across a parking lot, walk the bike.
       [EdgeKind.Gap]: 0,
+      [EdgeKind.Lot]: PUSH,
     },
     // Bike paths and bike lanes first, then quiet shared paths, then roads.
     prefer: { [EdgeKind.Road]: 1.15, [EdgeKind.Sidewalk]: 1.15, [EdgeKind.BikeOnly]: 1.2, [EdgeKind.Shared]: 1.05, [EdgeKind.Steps]: 3 },

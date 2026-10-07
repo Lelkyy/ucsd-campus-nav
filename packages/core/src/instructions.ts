@@ -90,7 +90,7 @@ function moveSteps(graph: CampusGraph, leg: MoveLeg, offset: number, first: bool
     return (graph.edgeBikeDir[e] & (forward ? BikeDir.NoForward : BikeDir.NoBackward)) !== 0;
   };
   const rawPush = (i: number) =>
-    bike && (kind(i) === EdgeKind.Path || kind(i) === EdgeKind.Custom || kind(i) === EdgeKind.Steps || against(i));
+    bike && (kind(i) === EdgeKind.Path || kind(i) === EdgeKind.Custom || kind(i) === EdgeKind.Steps || kind(i) === EdgeKind.Lot || against(i));
   // Only stretches of footpath long enough to matter get "walk your bike" instructions.
   const pushRun: boolean[] = [];
   for (let i = 0; i < c.length - 1; ) {
@@ -138,13 +138,15 @@ function moveSteps(graph: CampusGraph, leg: MoveLeg, offset: number, first: bool
       continue;
     }
 
-    // Leaving the paths to cut across open ground: say where to.
-    if (nextKind === EdgeKind.Gap && prevKind !== EdgeKind.Gap) {
+    // Leaving the paths to cut across open ground or a parking lot: say where to.
+    const offPath = (k: EdgeKind) => k === EdgeKind.Gap || k === EdgeKind.Lot;
+    if (offPath(nextKind) && nextKind !== prevKind) {
       let j = i;
-      while (j < c.length - 1 && kind(j) === EdgeKind.Gap) j++;
+      while (j < c.length - 1 && offPath(kind(j))) j++;
       const toward = (j < c.length - 1 && name(j)) || "the next path";
       const m = maneuverFor(normalize(bearingAround(c, cum, i, 1) - bearingAround(c, cum, i, -1)));
-      push(out, { maneuver: m, text: `${m === "straight" ? "Continue" : turnWords(m)} and cut across to ${toward}`, at: c[i], along });
+      const how = nextKind === EdgeKind.Lot ? `cross the parking lot to ${toward}` : `cut across to ${toward}`;
+      push(out, { maneuver: m, text: `${m === "straight" ? "Continue" : turnWords(m)} and ${how}`, at: c[i], along });
       continue;
     }
 

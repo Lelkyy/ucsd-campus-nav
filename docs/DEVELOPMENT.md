@@ -56,7 +56,7 @@ data/private/* (TSS) ──────┘                               ▼
     count; `separate` (the sidewalk is its own footway, already in the graph)
     and `no` don't. Untagged roads on campus are checked against UCSD's ground
     plan (below), stretch by stretch: a sidewalk or walkway within 14 m on either
-    side for at least half the stretch. Parking aisles and driveways never count.
+    side for at least half the stretch. Driveways never count.
     Untagged roads off the plan fall back to their type: residential, living,
     unclassified, tertiary and secondary roads, which around here almost always
     have one.
@@ -104,6 +104,17 @@ data/private/* (TSS) ──────┘                               ▼
     on the paths by a real part of the trip (`GAP_MIN_SAVING`: 10% of the trip
     and at least 20 s). Otherwise it stays on the paths. Directions say "... and
     cut across to <path>". Cuts aren't drawn as paths on the map.
+  - **Parking lots** (UCSD's ground plan, `Cell.Parking`): walk anywhere.
+    - **Aisles:** parking aisles, and road stretches mostly inside a lot, are
+      walkable (`Sidewalk` kind).
+    - **Walks across** (`LOT_RULE`, `EdgeKind.Lot`): aisles and paths in and within
+      6 m of a lot get a point every 15 m. Straight walks of up to 60 m join points
+      across the lot, mostly over the lot itself and never through a planter
+      island, building or street, where going round is longer (over 1.3x + 10 m).
+      At most four per point.
+    - **Ordinary walking:** no "worth it" test, a 10% preference for real paths,
+      and step-free. A bike is walked across. Directions say "... and cross the
+      parking lot to <path>"; not drawn as paths.
   - **Riding** can also use every other road in the area that bikes are allowed on.
   - **Cyclists keep right** (`bikeDirection`, `BikeDir` flags per edge, `edgeTravel`
     in the router):

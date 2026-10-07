@@ -115,6 +115,29 @@ describe("cutting across open ground", () => {
   });
 });
 
+describe("parking lots", () => {
+  // An aisle-less lot: paths on its west (0 - 1) and east (2 - 3) edges, ~55 m apart, joined only
+  // far to the north; a walk straight across the lot (1 - 2).
+  const lot = new CampusGraph({
+    ...tiny,
+    coords: [0, 0, 0, 0.0005, 0.0005, 0.0005, 0.0005, 0, 0, 0.003, 0.0005, 0.003],
+    edges: [0, 1, EdgeKind.Path, 2, 3, EdgeKind.Path, 1, 2, EdgeKind.Lot, 1, 4, EdgeKind.Path, 4, 5, EdgeKind.Path, 5, 2, EdgeKind.Path],
+    components: [0, 0, 0, 0, 0, 0],
+    bikeComponents: [0, 0, 0, 0, 0, 0],
+  });
+
+  it("walks straight across, as ordinary walking", () => {
+    const r = findRoute(lot, 0, [3], { profile: PROFILES.walk })!;
+    expect(r.meters).toBeLessThan(170);
+    expect(buildSteps(lot, r, "there").some((s) => /cross the parking lot/.test(s.text))).toBe(true);
+    // Step-free too; a bike is walked across.
+    expect(findRoute(lot, 0, [3], { profile: PROFILES.accessible })!.meters).toBeLessThan(170);
+    const ride = findRoute(lot, 0, [3], { profile: PROFILES.bike })!.legs[0] as MoveLeg;
+    expect(ride.meters).toBeLessThan(170);
+    expect(ride.pushMeters).toBeGreaterThan(50);
+  });
+});
+
 describe("cyclists keep right", () => {
   // A divided road: two one-way carriageways between 0 (south) and 2 (north), the east one
   // northbound (0 -> 1 -> 2), the west one southbound (2 -> 3 -> 0), each ~225 m; the sides

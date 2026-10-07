@@ -16,11 +16,15 @@ export const EdgeKind = {
   BikeOnly: 5,
   /** path where riding is allowed but not designated (highway=path, bicycle=yes) */
   Shared: 6,
-  /** a road with a sidewalk on it (tagged, or a residential or through road with no tag saying otherwise): walk on the sidewalk, ride on the road */
+  /** a road you can walk along: one with a sidewalk on it (tagged, seen on UCSD's ground plan, or a
+   *  residential or through road with no tag saying otherwise), or a parking lot aisle. Walk on the
+   *  sidewalk (or anywhere in the lot), ride on the road */
   Sidewalk: 7,
   /** walking straight across open ground (lawn, plaza, field) between two paths that don't meet
    *  nearby; taken only when it saves a real part of the trip */
   Gap: 8,
+  /** walking straight across a parking lot (you can walk anywhere in one): ordinary walking; a bike is walked across */
+  Lot: 9,
 } as const;
 export type EdgeKind = (typeof EdgeKind)[keyof typeof EdgeKind];
 

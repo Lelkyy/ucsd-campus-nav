@@ -79,7 +79,11 @@ export const Cell = {
   Covered: 32, // near a path already in the graph
   Alongside: 64, // within a path-width or two of one: a trace here all the way is that path, misaligned
   Open: 128, // open ground to cut across (see OPEN_GROUND)
+  Parking: 256, // parking lot: walk anywhere on it
 } as const;
+
+/** Ground you can walk on off the paths: open ground, and anywhere in a parking lot. */
+export const OFF_PATH = Cell.Open | Cell.Parking;
 
 const CLASS_BITS: Record<number, number> = {
   [GroundClass.WalkingPath]: Cell.Walk,
@@ -88,14 +92,14 @@ const CLASS_BITS: Record<number, number> = {
   [GroundClass.Street]: Cell.Street,
   [GroundClass.ServiceRoad]: Cell.Street,
   [GroundClass.Building]: 0,
-  [GroundClass.Parking]: 0,
+  [GroundClass.Parking]: Cell.Parking,
 };
 
 /** A metre grid over the box (flat-earth projection; fine at campus scale). */
 export class GroundGrid {
   readonly w: number;
   readonly h: number;
-  readonly bits: Uint8Array;
+  readonly bits: Uint16Array;
   private readonly mx: number;
   private readonly my: number;
   private readonly west: number;
@@ -112,7 +116,7 @@ export class GroundGrid {
     this.mx = haversine(w, (s + n) / 2, e, (s + n) / 2) / (e - w);
     this.w = Math.ceil(((e - w) * this.mx) / cell);
     this.h = Math.ceil(((n - s) * this.my) / cell);
-    this.bits = new Uint8Array(this.w * this.h);
+    this.bits = new Uint16Array(this.w * this.h);
   }
 
   /** Fractional cell coordinates of a point. */
@@ -165,22 +169,34 @@ export class GroundGrid {
   }
 
   /**
-   * Whether the straight line a–b crosses only walkable or open ground: nothing surveyed in the
-   * way (building, wall, planter, water, street...), and no more than `unsurveyedMeters` of
-   * ground the plan doesn't cover (seams between shapes).
+   * Whether the straight line a–b crosses only walkable ground or ground in `allowed` (open
+   * ground by default): nothing surveyed in the way (building, wall, planter, water, street...),
+   * and no more than `unsurveyedMeters` of ground the plan doesn't cover (seams between shapes).
    */
-  openBetween(a: LngLat, b: LngLat, unsurveyedMeters = 1.5): boolean {
-    const [ax, ay] = this.toCell(a);
-    const [bx, by] = this.toCell(b);
-    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay)));
+  openBetween(a: LngLat, b: LngLat, allowed: number = Cell.Open, unsurveyedMeters = 1.5): boolean {
     let unsurveyed = 0;
-    for (let k = 0; k <= steps; k++) {
-      const v = this.at(ax + ((bx - ax) * k) / steps, ay + ((by - ay) * k) / steps);
-      if (v & (Cell.Open | Cell.Walk | Cell.Sidewalk | Cell.Bike)) continue;
+    for (const v of this.sample(a, b)) {
+      if (v & (allowed | Cell.Walk | Cell.Sidewalk | Cell.Bike)) continue;
       if (v & Cell.Known) return false;
       if ((unsurveyed += this.cell) > unsurveyedMeters) return false;
     }
     return true;
+  }
+
+  /** Share of the line a–b on ground with one of `mask`'s bits. */
+  share(a: LngLat, b: LngLat, mask: number): number {
+    const cells = this.sample(a, b);
+    return cells.filter((v) => v & mask).length / cells.length;
+  }
+
+  /** The cells along the line a–b, one per cell length. */
+  private sample(a: LngLat, b: LngLat): number[] {
+    const [ax, ay] = this.toCell(a);
+    const [bx, by] = this.toCell(b);
+    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay)));
+    const out: number[] = [];
+    for (let k = 0; k <= steps; k++) out.push(this.at(ax + ((bx - ax) * k) / steps, ay + ((by - ay) * k) / steps));
+    return out;
   }
 
   /** Set `bit` on every cell within `meters` of the segment a–b. */

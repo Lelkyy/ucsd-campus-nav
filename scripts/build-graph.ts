@@ -41,7 +41,7 @@ import {
   type TransitPattern,
 } from "@campus/core";
 import { readGtfs, toSeconds, type Row } from "./gtfs.ts";
-import { Cell, fetchGround, GroundGrid, traceMissing, type GroundShape } from "./ground.ts";
+import { Cell, fetchGround, GroundGrid, OFF_PATH, traceMissing, type GroundShape } from "./ground.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RAW_OSM = join(ROOT, "data/raw/osm.json");
@@ -132,8 +132,8 @@ const LIKELY_SIDEWALK = new Set([
   "residential", "living_street", "unclassified", "tertiary", "tertiary_link", "secondary", "secondary_link",
 ]);
 
-/** Service roads that are never walked along: parking lot aisles, driveways, drive-throughs. */
-const NO_SIDEWALK_SERVICE = new Set(["parking_aisle", "driveway", "drive-through"]);
+/** Service roads that never have a sidewalk along them: driveways, drive-throughs. */
+const NO_SIDEWALK_SERVICE = new Set(["driveway", "drive-through"]);
 
 /** What the road's sidewalk tags say about walking along it, or undefined when it has none. */
 function sidewalkTag(tags: Record<string, string>): boolean | undefined {
@@ -259,6 +259,7 @@ async function main() {
 
   let blockedCount = 0;
   const sidewalkChecks = { yes: 0, no: 0 };
+  let lotAisles = 0;
   for (const way of ways) {
     if (!way.tags?.highway) continue;
     const classified = edgeKind(way.tags);
@@ -269,18 +270,19 @@ async function main() {
       blockedCount++;
       continue;
     }
+    const road = kind === EdgeKind.Sidewalk || kind === EdgeKind.Road;
     // Roads OSM doesn't say about: does the ground plan show a sidewalk along each stretch?
-    // (Not parking aisles or driveways: a sidewalk round the lot isn't one along the aisle.)
-    const askGround =
-      (kind === EdgeKind.Sidewalk || kind === EdgeKind.Road) &&
-      sidewalkTag(way.tags) === undefined &&
-      !NO_SIDEWALK_SERVICE.has(way.tags.service ?? "");
+    // (Not driveways: a sidewalk across the end of one isn't along it.)
+    const askGround = road && sidewalkTag(way.tags) === undefined && !NO_SIDEWALK_SERVICE.has(way.tags.service ?? "");
     for (let k = 0; k + 1 < way.nodes.length; k++) {
       const a = osmNode(way.nodes[k], way.geometry[k].lon, way.geometry[k].lat);
       const b = osmNode(way.nodes[k + 1], way.geometry[k + 1].lon, way.geometry[k + 1].lat);
-      const onGround = askGround ? sidewalkOnGround(ground, [coords[a], coords[b]]) : undefined;
+      // In a parking lot you can walk anywhere, its aisles included.
+      const inLot = road && (way.tags.service === "parking_aisle" || ground.share(coords[a], coords[b], Cell.Parking) >= 0.6);
+      if (inLot) lotAisles++;
+      const onGround = askGround && !inLot ? sidewalkOnGround(ground, [coords[a], coords[b]]) : undefined;
       if (onGround !== undefined) sidewalkChecks[onGround ? "yes" : "no"]++;
-      const segKind = onGround === undefined ? kind : onGround ? EdgeKind.Sidewalk : EdgeKind.Road;
+      const segKind = inLot ? EdgeKind.Sidewalk : onGround === undefined ? kind : onGround ? EdgeKind.Sidewalk : EdgeKind.Road;
       addEdge(a, b, segKind, bikeOk, nameId(way.tags.name), dir);
       onLevel(a, levelKey(way.tags));
       onLevel(b, levelKey(way.tags));
@@ -495,11 +497,37 @@ async function main() {
   const stepAcross = addStepAcross(coords, edges, index, nodeLevels, rawBuildings);
   for (const [a, b] of stepAcross) addEdge(a, b, EdgeKind.Path, false);
 
-  // --- Cutting across: walking straight over open ground (lawn, plaza, field) between paths
-  // up to 30 m apart whose own way round is much longer. The router takes one only when it
-  // saves a real part of the trip.
-  const gaps = addGaps(ground, coords, edges, index, nodeLevels);
+  // --- Cutting across: walking straight over open ground (lawn, field) between paths up to
+  // 30 m apart whose own way round is much longer. The router takes one only when it saves a
+  // real part of the trip.
+  const gaps = addCuts(ground, coords, edges, index, nodeLevels, GAP_RULE);
   for (const [a, b] of gaps) addEdge(a, b, EdgeKind.Gap, false);
+  // --- Parking lots: walk anywhere. Long aisles and paths in and round a lot get a point every
+  // 15 m, then straight walks join points across the lot where going round is longer.
+  // Ordinary walking, not a shortcut.
+  for (let e = 0, n = edges.length; e < n; e++) {
+    const [a, b, kind, bikeOk, name, dir] = edges[e];
+    if (!LOT_RULE.endKinds.has(kind) || kind === EdgeKind.Gap) continue;
+    const m = haversine(coords[a][0], coords[a][1], coords[b][0], coords[b][1]);
+    const parts = Math.ceil(m / LOT_SPLIT_METERS);
+    const at = (t: number): LngLat => [coords[a][0] + (coords[b][0] - coords[a][0]) * t, coords[a][1] + (coords[b][1] - coords[a][1]) * t];
+    if (parts < 2 || ![0, 0.5, 1].some((t) => ground.near(at(t), LOT_REACH_METERS, Cell.Parking))) continue;
+    const shared = [...(nodeLevels.get(a) ?? [])].filter((l) => nodeLevels.get(b)?.has(l));
+    let prev = a;
+    for (let k = 1; k < parts; k++) {
+      const p = at(k / parts);
+      const i = coords.push([round(p[0]), round(p[1])]) - 1;
+      index.add(i);
+      nodeLevels.set(i, new Set(shared.length ? shared : ["ground0"]));
+      edges.push([prev, i, kind, bikeOk, name, dir]);
+      edgeKeys.add(`${prev}-${i}`);
+      prev = i;
+    }
+    edges[e] = [prev, b, kind, bikeOk, name, dir];
+    edgeKeys.add(prev < b ? `${prev}-${b}` : `${b}-${prev}`);
+  }
+  const lotWalks = addCuts(ground, coords, edges, index, nodeLevels, LOT_RULE);
+  for (const [a, b] of lotWalks) addEdge(a, b, EdgeKind.Lot, false);
 
   // --- Roads without a sidewalk aren't for walking. Keep one only where it's the sole link to a
   // campus building or stop: the shortest-path tree from central campus, roads all but ruled out.
@@ -551,6 +579,7 @@ async function main() {
   // riding pieces that don't connect to central campus.
   const preWalk = components(coords.length, edges.filter((e) => walkable(e[2])));
   const usefulComp = new Set([...required, ...customNodes].map((i) => preWalk.id[i]));
+  // (A bike is walked across a parking lot, but never over the grass.)
   const rideable = (e: Edge) => e[2] !== EdgeKind.Gap;
   const preBike = components(coords.length, edges.filter(rideable));
   const hubBikeComp = preBike.id[hub];
@@ -796,7 +825,7 @@ async function main() {
   const count = (a: Building["access"]) => buildings.filter((b) => b.access === a).length;
   console.log(
     [
-      `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; step-across links: ${stepAcross.length}; cuts across open ground: ${finalEdges.filter((e) => e[2] === EdgeKind.Gap).length}; walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
+      `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; step-across links: ${stepAcross.length}; cuts across open ground: ${finalEdges.filter((e) => e[2] === EdgeKind.Gap).length}; walks across parking lots: ${finalEdges.filter((e) => e[2] === EdgeKind.Lot).length} (aisles walkable: ${lotAisles}); walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
       `riding: ${finalEdges.filter((e) => e[5] & (BikeDir.NoForward | BikeDir.NoBackward)).length} one-way segments (ridden only with the traffic), ` +
         `${finalEdges.filter((e) => e[5] & (BikeDir.LaneForward | BikeDir.LaneBackward)).length} with a bike lane (${finalEdges.filter((e) => (e[5] & BikeDir.LaneForward) !== 0 !== ((e[5] & BikeDir.LaneBackward) !== 0)).length} one side only)`,
       `walking network: ${new Set(Array.from(comps.id).filter((_, i) => walkNode[i])).size} pieces (main: ${mainSize} nodes); riding network main: ${bikeComps.size[mainBikeComponent]} nodes`,
@@ -1426,26 +1455,64 @@ class SegmentIndex {
   }
 }
 
-/** Longest cut across open ground between two paths. */
-const GAP_MAX_METERS = 30;
-/** A cut of `m` meters is added only where the paths between its ends take longer than this. */
-const gapDetour = (m: number) => 1.8 * m + 15;
-/** Each path point gets at most this many cuts (its shortest). */
-const GAPS_PER_NODE = 2;
-const GAP_END_KINDS = new Set<EdgeKind>([EdgeKind.Path, EdgeKind.Shared, EdgeKind.Bike, EdgeKind.Custom]);
+/** Points this close to a parking lot can start a walk across it (sidewalks round it, past the planting strip). */
+const LOT_REACH_METERS = 6;
+/** Aisles and paths in and round a lot get a point at least this often. */
+const LOT_SPLIT_METERS = 15;
+
+/** Which straight walks off the paths to add (see the calls). */
+interface CutRule {
+  minMeters: number;
+  maxMeters: number;
+  /** A walk of `m` meters is added only where the paths between its ends take longer than this. */
+  detour: (m: number) => number;
+  /** Each point gets at most this many (its shortest). */
+  perNode: number;
+  /** Kinds of edge a point may be on (all its edges). */
+  endKinds: ReadonlySet<EdgeKind>;
+  /** Extra condition on a point. */
+  end?: (p: LngLat, ground: GroundGrid) => boolean;
+  /** Whether the straight line between two points is walkable. */
+  line: (a: LngLat, b: LngLat, ground: GroundGrid) => boolean;
+}
+
+const FOOTPATH_KINDS = [EdgeKind.Path, EdgeKind.Shared, EdgeKind.Bike, EdgeKind.Custom];
+
+/** Cuts across open ground between footpaths 5-30 m apart (lawn, field; never a lot or street). */
+const GAP_RULE: CutRule = {
+  minMeters: STEP_ACROSS_METERS,
+  maxMeters: 30,
+  detour: (m) => 1.8 * m + 15,
+  perNode: 2,
+  endKinds: new Set(FOOTPATH_KINDS),
+  line: (a, b, ground) => ground.openBetween(a, b),
+};
 
 /**
- * Cuts across open ground (see the call): pairs of footpath points 5-30 m apart, on the same
- * level, with only walkable or open ground between them on UCSD's ground plan (no building,
- * wall, planter, water, parking lot or street in the way), where the walk along the paths is
- * much longer.
+ * Walks across a parking lot, up to 60 m, between points in or at the edge of it (aisles, and the
+ * paths and sidewalks round it), mostly over the lot itself.
  */
-function addGaps(
+const LOT_RULE: CutRule = {
+  minMeters: 3,
+  maxMeters: 60,
+  detour: (m) => 1.3 * m + 10,
+  perNode: 4,
+  endKinds: new Set([...FOOTPATH_KINDS, EdgeKind.Sidewalk, EdgeKind.Gap, EdgeKind.Lot]),
+  end: (p, ground) => ground.near(p, LOT_REACH_METERS, Cell.Parking),
+  line: (a, b, ground) => ground.openBetween(a, b, OFF_PATH) && ground.share(a, b, Cell.Parking) >= 0.5,
+};
+
+/**
+ * Straight walks off the paths between pairs of points on the same ground level, where the
+ * walk along the paths between them is much longer and the ground in between passes the rule.
+ */
+function addCuts(
   ground: GroundGrid,
   coords: LngLat[],
   edges: Edge[],
   index: PointIndex,
   nodeLevels: Map<number, Set<string>>,
+  rule: CutRule,
 ): [number, number][] {
   const adj: [number, number, EdgeKind][][] = coords.map(() => []);
   for (const [a, b, kind] of edges) {
@@ -1454,10 +1521,14 @@ function addGaps(
     adj[a].push([b, m, kind]);
     adj[b].push([a, m, kind]);
   }
-  // Points on footpaths alone, at ground level: not road junctions, stairs, bridges or tunnels.
-  const footOnly = (i: number) => adj[i].length > 0 && adj[i].every(([, , k]) => GAP_END_KINDS.has(k));
+  // Only points where every edge is of the rule's kinds, at ground level: not bridges or tunnels.
   const levels = (i: number) => nodeLevels.get(i) ?? new Set(["ground0"]);
-  const onGround = (i: number) => [...levels(i)].some((l) => l.startsWith("ground"));
+  const endOk = (i: number) =>
+    adj[i].length > 0 &&
+    adj[i].every(([, , k]) => rule.endKinds.has(k)) &&
+    [...levels(i)].some((l) => l.startsWith("ground")) &&
+    (!rule.end || rule.end(coords[i], ground));
+  const ends = coords.map((_, i) => endOk(i));
   const sameLevel = (a: number, b: number) => [...levels(a)].some((l) => levels(b).has(l));
   // Walking distance along the paths from i to everything within `limit`.
   const walkFrom = (i: number, limit: number) => {
@@ -1478,30 +1549,30 @@ function addGaps(
     return dist;
   };
 
-  const gaps: [number, number][] = [];
+  const cuts: [number, number][] = [];
   const seen = new Set<string>();
   for (let i = 0; i < coords.length; i++) {
-    if (!footOnly(i) || !onGround(i)) continue;
+    if (!ends[i]) continue;
     const p = coords[i];
     const near = index
-      .within(p, GAP_MAX_METERS, (j) => j !== i && footOnly(j) && onGround(j))
+      .within(p, rule.maxMeters, (j) => j !== i && ends[j])
       .map((j) => [j, haversine(p[0], p[1], coords[j][0], coords[j][1])] as const)
-      .filter(([, m]) => m >= STEP_ACROSS_METERS)
+      .filter(([, m]) => m >= rule.minMeters)
       .sort((a, b) => a[1] - b[1]);
     if (!near.length) continue;
-    const walk = walkFrom(i, gapDetour(GAP_MAX_METERS));
+    const walk = walkFrom(i, rule.detour(rule.maxMeters));
     let added = 0;
     for (const [j, m] of near) {
-      if (added >= GAPS_PER_NODE) break;
-      if ((walk.get(j) ?? Infinity) <= gapDetour(m) || !sameLevel(i, j) || !ground.openBetween(p, coords[j])) continue;
+      if (added >= rule.perNode) break;
+      if ((walk.get(j) ?? Infinity) <= rule.detour(m) || !sameLevel(i, j) || !rule.line(p, coords[j], ground)) continue;
       added++;
       const key = i < j ? `${i}-${j}` : `${j}-${i}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      gaps.push([i, j]);
+      cuts.push([i, j]);
     }
   }
-  return gaps;
+  return cuts;
 }
 
 /** Whether segments pq and rs properly cross. */
