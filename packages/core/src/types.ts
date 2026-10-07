@@ -62,12 +62,17 @@ export interface GraphData {
   /** Component of each node over every edge (the riding network). */
   bikeComponents: number[];
   mainBikeComponent: number;
+  /** Ground elevation of each node in decimeters (NO_ELEVATION on bridges, in tunnels and indoors). */
+  elevation?: number[];
   /** BikeDir flags per edge (missing = all 0: ride either way, no bike lane). */
   bikeDir?: number[];
   /** Path and street names, and each edge's index into them (-1 = unnamed). For directions. */
   names?: string[];
   edgeNames?: number[];
 }
+
+/** GraphData.elevation for a node off the ground (a bridge, tunnel or floor): stretches there count as level. */
+export const NO_ELEVATION = -32768;
 
 /** A door of a building, from OpenStreetMap entrance nodes. */
 export interface Entrance {

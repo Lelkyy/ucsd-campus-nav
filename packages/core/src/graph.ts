@@ -1,5 +1,5 @@
 import { haversine } from "./geo.ts";
-import type { EdgeKind, GraphData, LngLat } from "./types.ts";
+import { NO_ELEVATION, type EdgeKind, type GraphData, type LngLat } from "./types.ts";
 
 /** Grid cell size in degrees (~50 m at UCSD's latitude). */
 const CELL_DEG = 0.0005;
@@ -26,6 +26,8 @@ export class CampusGraph {
   readonly edgeLength: Float32Array;
   /** BikeDir flags per edge. */
   readonly edgeBikeDir: Uint8Array;
+  /** Ground elevation of each node in meters (NaN off the ground or unknown). */
+  readonly elevation: Float32Array;
 
   /** Neighbors of node i are adjEdge[adjStart[i] .. adjStart[i + 1]). */
   readonly adjStart: Uint32Array;
@@ -55,6 +57,8 @@ export class CampusGraph {
     this.edgeKind = new Uint8Array(m);
     this.edgeLength = new Float32Array(m);
     this.edgeBikeDir = data.bikeDir ? Uint8Array.from(data.bikeDir) : new Uint8Array(m);
+    this.elevation = new Float32Array(n).fill(NaN);
+    data.elevation?.forEach((dm, i) => dm !== NO_ELEVATION && (this.elevation[i] = dm / 10));
     const degree = new Uint32Array(n);
     for (let e = 0; e < m; e++) {
       const a = data.edges[3 * e];

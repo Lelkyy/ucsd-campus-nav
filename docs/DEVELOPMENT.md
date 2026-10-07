@@ -9,7 +9,7 @@
 | `npm test` | Routing, schedule and data-coverage tests (includes the real campus data) |
 | `npm run typecheck` | TypeScript across all packages |
 | `npm run build:graph` | Rebuild the map data from cached downloads + edits + private schedule |
-| `npm run fetch:osm` | Re-download OpenStreetMap data, the shuttle timetable and UCSD's ground plan, then rebuild |
+| `npm run fetch:osm` | Re-download OpenStreetMap data, the shuttle timetable, UCSD's ground plan and the elevation tiles, then rebuild |
 | `npm run fetch:places` | Re-download UCSD's campus places (restrooms, food, water, bike racks...) into `apps/web/public/data/campus-places.json` |
 | `npm run fetch:rooms` | Re-scrape building/room lists from the old public Schedule of Classes (terms up to Summer 2026) |
 
@@ -37,6 +37,16 @@ data/private/* (TSS) ──────┘                               ▼
     isn't allowed) plus preferences, and `MODES` maps the app's four options
     (Walk, No stairs, Bike, Bus) to profiles. Bus mode adds shuttle rides from
     the timetable. Routes can start at any exit of a building.
+  - **Hills:** walking speeds are for level ground and change with the slope of
+    each stretch (`hillFactor`, Tobler's hiking function scaled to 1.3 m/s on the
+    level). That's about 0.84x up a 5% grade, 0.6x up 15%, and 1.19x at its
+    fastest, 5% downhill; grades beyond 35% count as 35%. Stairs keep their own
+    speed. Elevations come from the open Terrain Tiles on AWS (zoom 15, about 4 m
+    a pixel, mostly USGS 3DEP; `scripts/terrain.ts`, cached in
+    `data/raw/terrain/`) and are stored per node (`GraphData.elevation`,
+    decimeters). Bridges, tunnels and indoor floors are `NO_ELEVATION` and count
+    as level. Against Google's walking times for five campus trips, four now land
+    within a minute (they were 0.7-2.2 min off).
   - `schedule.ts`: meetings (weekly or one-off, like exams) and "next class".
   - `sections.ts`: course sections from the schedule, grouped into choices
     (lecture group + one discussion/lab), and course search.
@@ -417,6 +427,9 @@ makes MTS free, and the app assumes you have one unless you untick it. Update
 
 ## Data & licenses
 
+- Elevation: [Terrain Tiles on AWS](https://registry.opendata.aws/terrain-tiles/)
+  (Mapzen terrarium tiles; around here mostly USGS 3DEP, public domain). Their
+  attribution terms ask to credit the sources.
 - Paths and buildings: © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/).
   Derived databases you publish must stay under ODbL.
 - Map around the illustrated drawing, and label fonts: [OpenFreeMap](https://openfreemap.org).

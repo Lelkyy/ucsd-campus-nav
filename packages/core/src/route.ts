@@ -24,6 +24,30 @@ export interface Profile {
   againstOneway?: Partial<Record<EdgeKind, number>>;
   /** Riding only: preference on a road with a bike lane in your direction (instead of the road's). */
   inBikeLane?: number;
+  /** Walking: speeds are for level ground and change with the slope (`hillFactor`). */
+  hills?: boolean;
+}
+
+/** Slopes steeper than this (a 35% grade) are taken as this steep: steeper is elevation noise. */
+const MAX_GRADE = 0.35;
+/**
+ * Walking speed on a slope relative to level ground: Tobler's hiking function,
+ * 6·e^(−3.5·|grade + 0.05|) km/h, divided by its level-ground value. Fastest on a gentle
+ * downhill (5% down: ~1.19x), ~0.84x up a 5% grade, ~0.5x up 15%, and slower again steeply down.
+ */
+export function hillFactor(grade: number): number {
+  const g = Math.max(-MAX_GRADE, Math.min(MAX_GRADE, grade));
+  return Math.exp(-3.5 * Math.abs(g + 0.05)) / Math.exp(-3.5 * 0.05);
+}
+/** The most `hillFactor` can speed you up (a 5% downhill). */
+const MAX_HILL_FACTOR = hillFactor(-0.05);
+
+/** Grade of edge `e` travelled from node `from` (rise over run; 0 where either end is off the ground). */
+export function edgeGrade(graph: CampusGraph, e: number, from: number): number {
+  const to = graph.other(e, from);
+  const rise = graph.elevation[to] - graph.elevation[from];
+  const run = graph.edgeLength[e];
+  return Number.isFinite(rise) && run > 0 ? rise / run : 0;
 }
 
 /**
@@ -33,7 +57,11 @@ export interface Profile {
 export function edgeTravel(graph: CampusGraph, profile: Profile, e: number, from: number): { speed: number; prefer: number } {
   const kind = graph.kind(e);
   const prefer = profile.prefer?.[kind] ?? 1;
-  if (profile.travel !== "bike") return { speed: profile.speed[kind], prefer };
+  if (profile.travel !== "bike") {
+    // Stairs have their own speed; everything else goes slower uphill.
+    const hill = profile.hills && kind !== EdgeKind.Steps ? hillFactor(edgeGrade(graph, e, from)) : 1;
+    return { speed: profile.speed[kind] * hill, prefer };
+  }
   const dir = graph.edgeBikeDir[e];
   const forward = graph.edgeFrom[e] === from;
   if (dir & (forward ? BikeDir.NoForward : BikeDir.NoBackward)) return { speed: profile.againstOneway?.[kind] ?? 0, prefer: 1 };
@@ -82,6 +110,7 @@ export const PROFILES = {
     id: "walk",
     label: "Walk",
     travel: "walk",
+    hills: true,
     speed: {
       [EdgeKind.Path]: WALK,
       [EdgeKind.Custom]: WALK,
@@ -103,6 +132,7 @@ export const PROFILES = {
     id: "accessible",
     label: "Avoid stairs",
     travel: "walk",
+    hills: true,
     speed: {
       [EdgeKind.Path]: WALK,
       [EdgeKind.Custom]: WALK,
@@ -295,7 +325,9 @@ function search(graph: CampusGraph, start: number | number[], targets: number[],
   const targetSet = new Set(targets);
   const tLon = targets.map((t) => graph.lon[t]);
   const tLat = targets.map((t) => graph.lat[t]);
-  const fastest = transit ? MAX_TRANSIT_SPEED_MPS : Math.max(...Object.values(profile.speed));
+  const fastest = transit
+    ? MAX_TRANSIT_SPEED_MPS
+    : Math.max(...Object.values(profile.speed)) * (profile.hills ? MAX_HILL_FACTOR : 1);
   const heuristic = (i: number) => {
     const [lon, lat] = pos(i);
     let best = Infinity;

@@ -2,14 +2,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { distanceMeters } from "./geo.ts";
 import { CampusGraph } from "./graph.ts";
-import { PROFILES, findRoute, findRouteArriveBy, rideRuns, usesGap, type MoveLeg, type Route } from "./route.ts";
+import { PROFILES, findRoute, findRouteArriveBy, hillFactor, rideRuns, usesGap, type MoveLeg, type Route } from "./route.ts";
 import { dayClasses, defaultPick, groupOverlaps, nextClass, startOn, type ClassMeeting } from "./schedule.ts";
 import { formatCourseCode, searchCourses, sectionChoices, type CourseSections, type SectionsData } from "./sections.ts";
 import { TransitNetwork, type TransitData } from "./transit.ts";
 import { checkBusRoute, planRoute } from "./plan.ts";
 import { transitOptions } from "./transitOptions.ts";
 import { buildSteps } from "./instructions.ts";
-import { BikeDir, EdgeKind, type Building, type GraphData, type IndoorData, type LngLat } from "./types.ts";
+import { BikeDir, EdgeKind, NO_ELEVATION, type Building, type GraphData, type IndoorData, type LngLat } from "./types.ts";
 
 // Small synthetic graph, ~111 m per 0.001° of latitude:
 //
@@ -76,6 +76,33 @@ describe("what walkers keep off", () => {
   it("walks the long way round rather than along a road with no sidewalk", () => {
     expect(takesDirect(choice(EdgeKind.Road, 0.0015))).toBe(false);
     expect(takesDirect(choice(EdgeKind.Sidewalk, 0.0015))).toBe(true);
+  });
+});
+
+describe("hills", () => {
+  // One ~111 m path climbing 11 m (a 10% grade) from node 0 to node 1.
+  const hill = (elevation?: number[]) =>
+    new CampusGraph({ ...tiny, coords: [0, 0, 0, 0.001], edges: [0, 1, EdgeKind.Path], components: [0, 0], bikeComponents: [0, 0], elevation });
+  const slope = hill([0, 111]);
+  const seconds = (g: CampusGraph, from: number, to: number) => findRoute(g, from, [to], { profile: PROFILES.walk })!.seconds;
+
+  it("walks slower uphill than down, and level ground at the usual pace", () => {
+    const level = seconds(hill(), 0, 1);
+    expect(level).toBeCloseTo(111 / 1.3, -1);
+    const up = seconds(slope, 0, 1);
+    const down = seconds(slope, 1, 0);
+    // Tobler: ~0.70x level speed up a 10% grade, ~1.19x at 5% down, ~1.0x at 10% down.
+    expect(up / level).toBeGreaterThan(1.35);
+    expect(up / level).toBeLessThan(1.5);
+    expect(down / level).toBeGreaterThan(0.95);
+    expect(down / level).toBeLessThan(1.05);
+    expect(hillFactor(-0.05)).toBeGreaterThan(1.18);
+    expect(hillFactor(0)).toBe(1);
+    expect(hillFactor(0.05)).toBeCloseTo(0.84, 2);
+  });
+
+  it("counts bridges, tunnels and floors as level", () => {
+    expect(seconds(hill([0, NO_ELEVATION]), 0, 1)).toBeCloseTo(seconds(hill(), 0, 1), 3);
   });
 });
 

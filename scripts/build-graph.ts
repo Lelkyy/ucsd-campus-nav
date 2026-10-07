@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import {
   BikeDir,
   EdgeKind,
+  NO_ELEVATION,
   haversine,
   type Building,
   type GraphData,
@@ -41,6 +42,7 @@ import {
   type TransitPattern,
 } from "@campus/core";
 import { readGtfs, toSeconds, type Row } from "./gtfs.ts";
+import { fetchTerrain, Terrain } from "./terrain.ts";
 import { Cell, fetchGround, GroundGrid, OFF_PATH, traceMissing, type GroundShape } from "./ground.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -51,6 +53,8 @@ const RAW_UCSD_POINTS = join(ROOT, "data/raw/ucsd-building-points.geojson");
 const RAW_GROUND = join(ROOT, "data/raw/ucsd-ground.json");
 /** Every building outline in the area, named or not (kept out of walks across lawns and lots). */
 const RAW_OSM_BUILDINGS = join(ROOT, "data/raw/osm-buildings.json");
+/** Elevation tiles (Terrain Tiles on AWS, mostly USGS 3DEP), for walking times up and down hills. */
+const RAW_TERRAIN_DIR = join(ROOT, "data/raw/terrain");
 /** Building footprints from UC San Diego's public Campus Map (campusmap.ucsd.edu). */
 const UCSD_BUILDINGS = "https://admin-enterprise-gis.ucsd.edu/server/rest/services/AdministrationServices/Buildings_Public/MapServer";
 const UCSD_QUERY = "/query?where=1%3D1&outFields=OBJECTID,FacilityLongName,BuildingAliases&outSR=4326&resultRecordCount=2000&f=geojson";
@@ -810,10 +814,24 @@ async function main() {
 
   // --- Write.
   const [s, w, n, e] = BBOX;
+  // Ground elevation of each node, for walking times on slopes. Bridges, tunnels and indoor floors
+  // aren't on the ground the elevation model describes: stretches there count as level.
+  // (Over everything in the graph: ways that cross the area's edge run on past it.)
+  const lats = finalCoords.map((p) => p[1]);
+  const lons = finalCoords.map((p) => p[0]);
+  await fetchTerrain([Math.min(...lats), Math.min(...lons), Math.max(...lats), Math.max(...lons)], RAW_TERRAIN_DIR, refresh);
+  const terrain = new Terrain(RAW_TERRAIN_DIR);
+  const original = new Int32Array(finalCoords.length);
+  remap.forEach((f, i) => f !== -1 && (original[f] = i));
+  const elevation = finalCoords.map((p, i) => {
+    const levels = nodeLevels.get(original[i]);
+    const onGround = !levels || [...levels].some((l) => l.startsWith("ground"));
+    return onGround ? Math.round(terrain.at(p) * 10) : NO_ELEVATION;
+  });
   const graph: GraphData = {
     version: 1,
     generatedAt: raw.osm3s?.timestamp_osm_base ?? new Date().toISOString(),
-    attribution: "© OpenStreetMap contributors (ODbL)",
+    attribution: "© OpenStreetMap contributors (ODbL); elevation: Terrain Tiles on AWS (USGS 3DEP and others)",
     bbox: [w, s, e, n],
     coords: finalCoords.flat(),
     edges: finalEdges.flatMap(([a, b, k]) => [a, b, k]),
@@ -821,6 +839,7 @@ async function main() {
     mainComponent,
     bikeComponents: Array.from(bikeComps.id),
     mainBikeComponent,
+    elevation,
     bikeDir: finalEdges.map((e) => e[5]),
     names,
     edgeNames: finalEdges.map((e) => e[4]),
