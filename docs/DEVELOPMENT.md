@@ -308,13 +308,9 @@ The **Map** button picks one of two campus maps (kept in `localStorage`,
 
 In Campus mode the topographic map covers all of OpenStreetMap's drawing.
 
-On both, every path you can walk is drawn on top: the routing graph's walkable
-edges, but not ride-only roads or the straight walks across lawns and parking
-lots. They're white lines with a warm edge (`walkways`, `WALKWAY_LAYERS`); stairs
-are dashed, and the lines are a little softer over the drawing. They sit under
-the app's own layers, with no street names.
-- **Covered stretches** are dotted in the edge color: under a building (or in a
-  tunnel), where the path can't be seen from above. The build marks them
+No path lines are drawn over either map, except:
+- **Covered stretches** are dotted (`coveredPaths`, warm gray; olive over the
+  drawing): paths under a building or in a tunnel, which neither map shows. The build marks them
   (`GraphData.covered`): tunnels and indoor corridors by their tags, and any
   stretch at least half inside a building outline. Outlines come from all 3,000
   OSM buildings and building parts, named or not (`data/raw/osm-buildings.json`,
