@@ -53,7 +53,20 @@ export interface RouteLine {
   coordinates: LngLat[];
   kind: "walk" | "bike" | "bus";
   color: string;
+  /** A ride along a road: drawn on the right-hand side of it, where cyclists ride. */
+  keepRight?: boolean;
 }
+
+/** Shift for a ride on a road: about 3.5 m to the right of the centre line, at any zoom. */
+const KEEP_RIGHT_OFFSET: ExpressionSpecification = [
+  "interpolate",
+  ["exponential", 2],
+  ["zoom"],
+  14,
+  ["case", ["get", "keepRight"], 0.45, 0],
+  20,
+  ["case", ["get", "keepRight"], 28, 0],
+];
 
 setWorkerUrl(workerUrl);
 
@@ -265,7 +278,7 @@ export function MapView(props: MapViewProps) {
         source: "route",
         filter: ["!=", ["get", "kind"], "walk"],
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": PALETTE.oliveDeep, "line-width": 11 },
+        paint: { "line-color": PALETTE.oliveDeep, "line-width": 11, "line-offset": KEEP_RIGHT_OFFSET },
       });
       // A soft white underlay so the dotted walk stays readable over parks and buildings.
       map.addLayer({
@@ -290,7 +303,7 @@ export function MapView(props: MapViewProps) {
         source: "route",
         filter: ["!=", ["get", "kind"], "walk"],
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": ["get", "color"], "line-width": 7 },
+        paint: { "line-color": ["get", "color"], "line-width": 7, "line-offset": KEEP_RIGHT_OFFSET },
       });
       // The day view: dotted walks between classes in the next class's color, numbered pins.
       map.addLayer({
@@ -487,7 +500,7 @@ export function MapView(props: MapViewProps) {
       // Rides last so they draw over the walking legs they meet.
       features: [...lines]
         .sort((a, b) => Number(a.kind !== "walk") - Number(b.kind !== "walk"))
-        .map((l) => ({ ...lineFeature(l.coordinates), properties: { kind: l.kind, color: l.color } })),
+        .map((l) => ({ ...lineFeature(l.coordinates), properties: { kind: l.kind, color: l.color, keepRight: !!l.keepRight } })),
     });
     source(map, "connectors").setData({
       type: "FeatureCollection",

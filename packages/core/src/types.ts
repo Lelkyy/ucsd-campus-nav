@@ -5,11 +5,12 @@ export const EdgeKind = {
   /** footway, pedestrian plaza, corridor: walk; cyclists walk their bike */
   Path: 0,
   Steps: 1,
-  /** cycleway or path designated for bikes; walked like a footpath (even if tagged foot=no) */
+  /** cycleway, path designated for bikes, or a footpath on a surveyed bike path; walkable (even if
+   *  tagged foot=no), but walkers keep off unless it saves real time */
   Bike: 2,
   /** traced by hand into data/custom-paths.geojson */
   Custom: 3,
-  /** a road kept for walking because it's the sole link to a campus building or bus stop */
+  /** a road with no sidewalk, kept for walking only where it's the sole link to a campus building or bus stop */
   Road: 4,
   /** rideable but not part of the walking network: other roads, foot=no cycleways */
   BikeOnly: 5,
@@ -19,6 +20,22 @@ export const EdgeKind = {
   Sidewalk: 7,
 } as const;
 export type EdgeKind = (typeof EdgeKind)[keyof typeof EdgeKind];
+
+/**
+ * Riding direction flags of an edge ("forward" = from its first node to its second). Cyclists
+ * keep right: they ride one-way roads and paths only with the traffic, so the right-hand
+ * carriageway of a divided road; a bike lane counts only in the direction it serves.
+ */
+export const BikeDir = {
+  /** One-way against this direction: no riding first -> second. */
+  NoForward: 1,
+  /** One-way: no riding second -> first. */
+  NoBackward: 2,
+  /** A bike lane (or track) for riding first -> second. */
+  LaneForward: 4,
+  /** A bike lane for riding second -> first. */
+  LaneBackward: 8,
+} as const;
 
 /** Serialized graph written by scripts/build-graph.ts. */
 export interface GraphData {
@@ -38,6 +55,8 @@ export interface GraphData {
   /** Component of each node over every edge (the riding network). */
   bikeComponents: number[];
   mainBikeComponent: number;
+  /** BikeDir flags per edge (missing = all 0: ride either way, no bike lane). */
+  bikeDir?: number[];
   /** Path and street names, and each edge's index into them (-1 = unnamed). For directions. */
   names?: string[];
   edgeNames?: number[];
@@ -105,6 +124,9 @@ export interface Building {
   center: LngLat;
   /** Graph node indices a route may end at (entrances when mapped, else nearby path nodes). */
   targets: number[];
+  /** Ride-only road nodes beside the building (roads with no sidewalk): where a bike can pull up
+   *  or set off, besides the targets. */
+  rideTargets?: number[];
   /** How many targets are real mapped entrances (0 = approximated from the outline). */
   entranceCount: number;
   /** "walk": reachable on foot from central campus; "shuttle": only with a shuttle ride. */

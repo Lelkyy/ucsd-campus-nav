@@ -2,7 +2,7 @@ import { MinHeap } from "./heap.ts";
 import { WALKING_SPEED_MPS, haversine } from "./geo.ts";
 import type { CampusGraph } from "./graph.ts";
 import { secondsSinceMidnight, type TransitNetwork, type TransitRoute, type TransitStop } from "./transit.ts";
-import { EdgeKind, type LngLat } from "./types.ts";
+import { BikeDir, EdgeKind, type LngLat } from "./types.ts";
 
 /** How you get around: travel speed and route preference per kind of path. */
 export interface Profile {
@@ -17,6 +17,48 @@ export interface Profile {
    * slower than it is, so routes favour others when they're about equal.
    */
   prefer?: Partial<Record<EdgeKind, number>>;
+  /**
+   * Riding only: speed going the wrong way along a one-way (0 or missing = not allowed). Riding
+   * against traffic isn't: off the bike and walk it, where there's a sidewalk or path to walk on.
+   */
+  againstOneway?: Partial<Record<EdgeKind, number>>;
+  /** Riding only: preference on a road with a bike lane in your direction (instead of the road's). */
+  inBikeLane?: number;
+}
+
+/**
+ * Speed and preference for travelling edge `e` from node `from`. Riders keep right: one-ways
+ * only with the traffic, and a road's bike lane only in the direction it serves.
+ */
+export function edgeTravel(graph: CampusGraph, profile: Profile, e: number, from: number): { speed: number; prefer: number } {
+  const kind = graph.kind(e);
+  const prefer = profile.prefer?.[kind] ?? 1;
+  if (profile.travel !== "bike") return { speed: profile.speed[kind], prefer };
+  const dir = graph.edgeBikeDir[e];
+  const forward = graph.edgeFrom[e] === from;
+  if (dir & (forward ? BikeDir.NoForward : BikeDir.NoBackward)) return { speed: profile.againstOneway?.[kind] ?? 0, prefer: 1 };
+  if (dir & (forward ? BikeDir.LaneForward : BikeDir.LaneBackward)) return { speed: profile.speed[kind], prefer: profile.inBikeLane ?? prefer };
+  return { speed: profile.speed[kind], prefer };
+}
+
+/** Road kinds a rider shares with traffic (drawn on the right-hand side of the road). */
+const ROAD_KINDS = new Set<EdgeKind>([EdgeKind.Road, EdgeKind.Sidewalk, EdgeKind.BikeOnly]);
+
+/**
+ * A ride split into stretches on roads (ridden, so on the right-hand side) and everything else
+ * (paths, and roads where the bike is walked), for drawing.
+ */
+export function rideRuns(graph: CampusGraph, profile: Profile, leg: MoveLeg): { coordinates: LngLat[]; keepRight: boolean }[] {
+  const runs: { coordinates: LngLat[]; keepRight: boolean }[] = [];
+  for (let k = 0; k + 1 < leg.coordinates.length; k++) {
+    const e = leg.edges[k];
+    const keepRight =
+      e >= 0 && ROAD_KINDS.has(graph.kind(e)) && edgeTravel(graph, profile, e, leg.nodes[k]).speed >= PUSH_THRESHOLD;
+    const run = runs[runs.length - 1];
+    if (run && run.keepRight === keepRight) run.coordinates.push(leg.coordinates[k + 1]);
+    else runs.push({ coordinates: [leg.coordinates[k], leg.coordinates[k + 1]], keepRight });
+  }
+  return runs;
 }
 
 const WALK = WALKING_SPEED_MPS;
@@ -26,6 +68,8 @@ const RIDE = 5;
 const RIDE_SHARED = 3.5;
 /** Walking a bike where riding isn't allowed. */
 const PUSH = 1.2;
+
+const WALK_PREFER = { [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Bike]: 1.5, [EdgeKind.Road]: 10 };
 
 export const PROFILES = {
   walk: {
@@ -43,8 +87,9 @@ export const PROFILES = {
       [EdgeKind.Steps]: WALK / 1.4,
       [EdgeKind.BikeOnly]: 0,
     },
-    // Prefer footpaths, then sidewalks along roads; connector roads only when nothing else goes there.
-    prefer: { [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Road]: 1.5 },
+    // Prefer footpaths, then sidewalks along roads. Bike paths only for a real time saving
+    // (a third or more on that stretch); a road with no sidewalk only when nothing else goes there.
+    prefer: WALK_PREFER,
   },
   accessible: {
     id: "accessible",
@@ -60,7 +105,7 @@ export const PROFILES = {
       [EdgeKind.Steps]: 0,
       [EdgeKind.BikeOnly]: 0,
     },
-    prefer: { [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Road]: 1.5 },
+    prefer: WALK_PREFER,
   },
   bike: {
     id: "bike",
@@ -78,8 +123,18 @@ export const PROFILES = {
       // Carrying a bike up or down stairs: possible, but only as a last resort.
       [EdgeKind.Steps]: 0.4,
     },
-    // Bike paths first, then quiet shared paths, then roads.
+    // Bike paths and bike lanes first, then quiet shared paths, then roads.
     prefer: { [EdgeKind.Road]: 1.15, [EdgeKind.Sidewalk]: 1.15, [EdgeKind.BikeOnly]: 1.2, [EdgeKind.Shared]: 1.05, [EdgeKind.Steps]: 3 },
+    inBikeLane: 1,
+    // The wrong way down a one-way: walk the bike on its sidewalk or path, never ride.
+    againstOneway: {
+      [EdgeKind.Sidewalk]: PUSH,
+      [EdgeKind.Bike]: PUSH,
+      [EdgeKind.Shared]: PUSH,
+      [EdgeKind.Path]: PUSH,
+      [EdgeKind.Custom]: PUSH,
+      [EdgeKind.Steps]: 0.4,
+    },
   },
 } satisfies Record<string, Profile>;
 
@@ -259,11 +314,10 @@ export function findRoute(
     if (u < n) {
       for (let k = graph.adjStart[u]; k < graph.adjStart[u + 1]; k++) {
         const e = graph.adjEdge[k];
-        const kind = graph.kind(e);
-        const speed = profile.speed[kind];
+        const { speed, prefer } = edgeTravel(graph, profile, e, u);
         if (!speed) continue;
         const dt = graph.edgeLength[e] / speed;
-        const c = cost[u] + dt * (profile.prefer?.[kind] ?? 1) * walkWeight;
+        const c = cost[u] + dt * prefer * walkWeight;
         relax(graph.other(e, u), u, c, clock[u] + dt, { kind: "edge", edge: e });
       }
       for (const { stop, meters } of transit?.nodeStops.get(u) ?? []) {
@@ -354,7 +408,7 @@ function buildRoute(
       if (step.kind === "edge") {
         const kind = graph.kind(step.edge);
         const meters = graph.edgeLength[step.edge];
-        const speed = profile.speed[kind];
+        const { speed } = edgeTravel(graph, profile, step.edge, last);
         move.meters += meters;
         move.seconds += meters / speed;
         move.stairSegments += kind === EdgeKind.Steps ? 1 : 0;

@@ -9,7 +9,7 @@
 | `npm test` | Routing, schedule and data-coverage tests (includes the real campus data) |
 | `npm run typecheck` | TypeScript across all packages |
 | `npm run build:graph` | Rebuild the map data from cached downloads + edits + private schedule |
-| `npm run fetch:osm` | Re-download OpenStreetMap data and the shuttle timetable, then rebuild |
+| `npm run fetch:osm` | Re-download OpenStreetMap data, the shuttle timetable and UCSD's ground plan, then rebuild |
 | `npm run fetch:places` | Re-download UCSD's campus places (restrooms, food, water, bike racks...) into `apps/web/public/data/campus-places.json` |
 | `npm run fetch:rooms` | Re-scrape building/room lists from the old public Schedule of Classes (terms up to Summer 2026) |
 
@@ -18,6 +18,7 @@
 ```
 OpenStreetMap (Overpass) ──┐
 Triton Transit GTFS ───────┤
+UCSD ground plan ──────────┤
 data/custom-paths.geojson ─┤
 data/blocked-ways.json ────┼─► scripts/build-graph.ts ─► apps/web/public/data/
 data/building-codes.json ──┤                               graph · buildings · transit · sections*
@@ -45,17 +46,47 @@ data/private/* (TSS) ──────┘                               ▼
   - **Edge kinds:** footpaths, stairs, bike paths, shared paths (bikes allowed
     but not designated), roads with sidewalks, connector roads, and bike-only
     roads.
-  - **Bike paths** are walked exactly like footpaths, whatever their `foot`
-    tag says: pedestrians use them here.
+  - **Bike paths** are walkable whatever their `foot` tag says (pedestrians
+    use them here), but walkers keep off them unless it's worth it: a bike path
+    counts as 1.5x its walking time, so it's taken only when it saves about a
+    third or more on that stretch.
   - **Roads with sidewalks** (`hasSidewalk`) are walked like footpaths
-    (a 5% preference for paths) and ridden like roads: OSM `sidewalk`,
-    `sidewalk:both|left|right` = both/left/right/yes, or, with no sidewalk tag
-    at all, residential, living, unclassified, tertiary and secondary roads,
-    which around here almost always have one. `separate` (the sidewalk is its
-    own footway, already in the graph), `no` and untagged service roads
-    (parking aisles, driveways) don't count.
-  - **Other roads** are walked only where they're the sole link to a campus
-    building or shuttle stop. Path pieces that lead to neither are dropped.
+    (a 5% preference for paths) and ridden like roads. A road's OSM `sidewalk`
+    tags decide first: `sidewalk`, `sidewalk:both|left|right` = both/left/right/yes
+    count; `separate` (the sidewalk is its own footway, already in the graph)
+    and `no` don't. Untagged roads on campus are checked against UCSD's ground
+    plan (below), stretch by stretch: a sidewalk or walkway within 14 m on either
+    side for at least half the stretch. Parking aisles and driveways never count.
+    Untagged roads off the plan fall back to their type: residential, living,
+    unclassified, tertiary and secondary roads, which around here almost always
+    have one.
+  - **Roads without a sidewalk** aren't for walking: one is kept (at 10x its
+    walking time) only where it's the sole way to a campus building or shuttle
+    stop (111 short stretches, mostly service roads to loading docks and
+    outbuildings). Path pieces that lead to neither are dropped.
+  - **UCSD's ground plan** (`scripts/ground.ts`): the "Ground Level Basemap" of
+    the public Campus Map's vector tiles, which outlines every sidewalk, walking
+    path, bike path, street and building at ground level (cached in
+    `data/raw/ucsd-ground.json`, refreshed with `--refresh`). It's rasterized at
+    0.5 m and used three ways:
+    - **Missing walkways:** walkable ground (walking paths, sidewalks, bike
+      paths) with no mapped path within 3.5 m is thinned to centre lines
+      (Zhang-Suen), and the lines are added as footpaths (or bike paths, if
+      mostly on bike path), joined onto the paths they run into (within 6 m).
+      Short dead-end spurs (under 15 m) and lines that run beside a mapped path
+      the whole way (within 9 m: the same path, where OSM and the survey
+      disagree by a few meters, mostly on trails) are dropped. About 36 km of
+      walkways come in this way: courtyards, building-side walks, plazas,
+      sidewalks and trails OSM doesn't have.
+    - **Bike paths:** OSM footpath segments lying on a surveyed bike path become
+      bike paths.
+    - **Sidewalks** along untagged roads (above).
+    Only ground-level paths count: a tunnel or bridge doesn't cover the
+    walkway above or below it, and no traced walkway joins one. A passage
+    through a building (`tunnel=building_passage`) is at ground level. Where the
+    plan shows a walkway under a roof, it's an open passage at ground level and
+    is kept. The plan is newer than the illustrated map (it has the new Sixth
+    College), so check it against satellite imagery, not the drawing.
   - **Stepping across** (`addStepAcross`): footpaths that come within 5 m of
     each other without meeting in OSM (a path ending just short of another,
     two paths side by side) get a short walking link, unless the walk between
@@ -63,6 +94,24 @@ data/private/* (TSS) ──────┘                               ▼
     on footpaths alone (not road junctions or stairs), never between levels
     (`levelKey`: bridge, tunnel, indoors), never through a building wall.
   - **Riding** can also use every other road in the area that bikes are allowed on.
+  - **Cyclists keep right** (`bikeDirection`, `BikeDir` flags per edge, `edgeTravel`
+    in the router):
+    - **One-ways:** one-way roads and paths are ridden only with the traffic (`oneway`,
+      roundabouts, `oneway:bicycle`; `oneway:bicycle=no` and `cycleway=opposite*`
+      allow contraflow). A divided road is mapped as two one-way carriageways, so
+      each direction rides the carriageway on its right.
+    - **Going against a one-way:** no riding. You get off and walk the bike, where
+      there's a sidewalk or path to do it on ("Get off and walk your bike on the
+      sidewalk ... (one-way the other way)").
+    - **Bike lanes:** a lane counts only in the direction it serves. With traffic on
+      the right, `cycleway:right` is for riding forward and `cycleway:left` for
+      riding back; on a one-way, both go with the traffic. A road with a lane in
+      your direction loses the road's 15-20% penalty.
+    - **On the map:** rides along roads are drawn on the right-hand side of the
+      road (about 3.5 m off the centre line), where you actually ride.
+    - **Buildings:** each also gets `rideTargets`, ride-only road nodes within 15 m,
+      so a bike can pull up beside a building on a road that has no sidewalk to
+      walk.
   - Only buildings inside the OSM campus boundary are included. Each building
     gets route targets: mapped entrances when OSM has them, otherwise path
     points along its walls.
@@ -354,4 +403,5 @@ makes MTS free, and the app assumes you have one unless you untick it. Update
   terms forbid using its trademarks or implying endorsement).
 - Illustrated campus map: © UC San Diego (Concept3D tiles); campus map styles
   and places: UC San Diego's public ArcGIS campus map, on Esri World Topographic.
-  Check both are OK to show before a public release.
+  Walkways traced from UCSD's ground plan are in `graph.json` next to the OSM
+  paths. Check all of these are OK to use before a public release.

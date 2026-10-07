@@ -1,6 +1,6 @@
 import { distanceMeters } from "./geo.ts";
 import type { CampusGraph } from "./graph.ts";
-import { findRoute, findRouteArriveBy, type Profile, type Route } from "./route.ts";
+import { edgeTravel, findRoute, findRouteArriveBy, type Profile, type Route } from "./route.ts";
 import type { TransitNetwork } from "./transit.ts";
 import { entranceTargets } from "./indoor.ts";
 import { EdgeKind, type Building, type LngLat, type Place } from "./types.ts";
@@ -68,10 +68,11 @@ export function resolveTrip(graph: CampusGraph, from: Endpoint, to: Endpoint, pr
   const accept = profile.travel === "bike" ? graph.onBikeNetwork : graph.onWalkNetwork;
   const usable = (e: number) => profile.speed[graph.kind(e)] > 0;
   const stepFree = profile.speed[EdgeKind.Steps] === 0;
-  const targets = endpointNodes(graph, to, connectors, false, accept, usable, stepFree, (a) => (ends.end = a));
+  const riding = profile.travel === "bike";
+  const targets = endpointNodes(graph, to, connectors, false, accept, usable, stepFree, riding, (a) => (ends.end = a));
   if (targets.length === 0) return { ok: false, error: "Destination is too far from any mapped path." };
   // From a building, the router may leave through any of its exits and picks the best.
-  const start = endpointNodes(graph, from, connectors, true, accept, usable, stepFree, (a) => (ends.start = a));
+  const start = endpointNodes(graph, from, connectors, true, accept, usable, stepFree, riding, (a) => (ends.start = a));
   if (start.length === 0) return { ok: false, error: "Start is too far from any mapped path." };
   return { ok: true, start, targets, connectors, ends };
 }
@@ -109,10 +110,13 @@ function endpointNodes(
   accept: (i: number) => boolean,
   usable: (e: number) => boolean,
   stepFree: boolean,
+  riding: boolean,
   onApproach: (a: Approach) => void,
 ): number[] {
   if (e.kind === "building") {
-    return entranceTargets(e.building, (n) => graph.coord(n), { stepFree, roomAt: isStart ? undefined : e.roomAt });
+    const doors = entranceTargets(e.building, (n) => graph.coord(n), { stepFree, roomAt: isStart ? undefined : e.roomAt });
+    // A bike can also pull up on a road beside the building that has no sidewalk to walk.
+    return riding ? [...doors, ...(e.building.rideTargets ?? [])] : doors;
   }
   if (e.kind === "place") {
     const nodes = e.place.points.map((p) => graph.nearestNode(p, { maxMeters: 300, accept })).filter((n) => n !== -1);
@@ -135,16 +139,21 @@ export function approachCosts(
 ): { startCost?: Map<number, number>; targetCost?: Map<number, number> } {
   const costs = (a?: Approach) => {
     if (!a) return undefined;
-    const kind = graph.kind(a.edge);
-    const speed = profile.speed[kind] || profile.speed[EdgeKind.Path];
-    const prefer = profile.prefer?.[kind] ?? 1;
     const map = new Map<number, number>();
     for (const node of [graph.edgeFrom[a.edge], graph.edgeTo[a.edge]]) {
+      // Heading for `node` from the start point, or coming from `node` to the end point.
+      const { speed, prefer } = approachTravel(graph, profile, a.edge, a === ends.start ? node : graph.other(a.edge, node));
       map.set(node, (distanceMeters(a.at, graph.coord(node)) / speed) * prefer);
     }
     return map;
   };
   return { startCost: costs(ends.start), targetCost: costs(ends.end) };
+}
+
+/** Travel along part of an edge towards node `toward`; walking (or walking the bike) where the profile can't. */
+function approachTravel(graph: CampusGraph, profile: Profile, edge: number, toward: number): { speed: number; prefer: number } {
+  const t = edgeTravel(graph, profile, edge, graph.other(edge, toward));
+  return t.speed ? t : { speed: profile.speed[EdgeKind.Path], prefer: 1 };
 }
 
 /**
@@ -165,7 +174,7 @@ export function attachEnds(graph: CampusGraph, route: Route, ends: { start?: App
     if (node !== graph.edgeFrom[approach.edge] && node !== graph.edgeTo[approach.edge]) return;
     const d = distanceMeters(approach.at, graph.coord(node));
     if (d < 0.5) return;
-    const speed = profile.speed[graph.kind(approach.edge)] || profile.speed[EdgeKind.Path];
+    const { speed } = approachTravel(graph, profile, approach.edge, atStart ? node : graph.other(approach.edge, node));
     const sec = d / speed;
     legs[legIndex] = atStart
       ? { ...leg, coordinates: [approach.at, ...leg.coordinates], nodes: [-1, ...leg.nodes], edges: [-1, ...leg.edges], meters: leg.meters + d, seconds: leg.seconds + sec }

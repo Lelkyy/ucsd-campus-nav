@@ -16,7 +16,8 @@ the way, using the paths, stairs and bike paths students actually use.
 ## What it does
 
 - **Four ways to get there:** Walk, No stairs (step-free), Bike (bike paths
-  first, roads where needed, walking your bike only where riding isn't allowed),
+  and bike lanes first, roads where needed, always on the right with the
+  traffic, walking your bike only where riding isn't allowed),
   and Transit: campus shuttles, MTS buses and the Blue Line trolley on their
   real timetables. Like Google Maps, Transit lists up to three options, the
   shortest trip first (with times, lines, walking, transfers, "every N min",
@@ -41,6 +42,10 @@ the way, using the paths, stairs and bike paths students actually use.
   the day starts with when to leave home and ends with when you'll be back.
   Overlapping classes show as a conflict to choose from, and the day's walks
   (and trips home) are drawn on the map.
+- **Paths OSM doesn't have:** courtyards, building-side walks, plazas and
+  trails traced from UC San Diego's surveyed ground plan. Walks keep off bike
+  paths unless they save real time, and never follow a road with no sidewalk
+  unless it's the only way there.
 - **Two campus maps:** the official campus map (district names and campus
   boundary) or UC San Diego's illustrated one, with routes and paths drawn on
   top.

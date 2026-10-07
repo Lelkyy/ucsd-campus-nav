@@ -3,6 +3,8 @@ import {
   bearing,
   haversine,
   MODES,
+  PROFILES,
+  rideRuns,
   buildSteps,
   findRoom,
   type IndoorData,
@@ -406,13 +408,20 @@ export function App() {
     () => [...new Map((route?.legs ?? []).flatMap((l) => (l.mode === "bus" ? [l.from, l.to] : [])).map((s) => [s.id, s])).values()],
     [route],
   );
-  const routeLines: RouteLine[] | null = route
-    ? route.legs.map((l) => ({
-        coordinates: l.coordinates,
-        kind: l.mode,
-        color: l.mode === "bus" ? l.route.color : l.mode === "bike" ? BIKE_COLOR : "",
-      }))
-    : null;
+  const routeLines: RouteLine[] | null =
+    route && data
+      ? route.legs.flatMap((l): RouteLine[] =>
+          l.mode === "bike"
+            ? // On roads the ride is drawn on the right-hand side, where you ride.
+              rideRuns(data.graph, PROFILES.bike, l).map((r) => ({
+                coordinates: r.coordinates,
+                kind: "bike",
+                color: BIKE_COLOR,
+                keepRight: r.keepRight,
+              }))
+            : [{ coordinates: l.coordinates, kind: l.mode, color: l.mode === "bus" ? l.route.color : "" }],
+        )
+      : null;
 
   const locate = () => {
     if (!navigator.geolocation) return setHint("Location isn't available in this browser.");

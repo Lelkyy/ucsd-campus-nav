@@ -2,13 +2,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { distanceMeters } from "./geo.ts";
 import { CampusGraph } from "./graph.ts";
-import { PROFILES, findRoute, findRouteArriveBy } from "./route.ts";
+import { PROFILES, findRoute, findRouteArriveBy, rideRuns, type MoveLeg, type Route } from "./route.ts";
 import { dayClasses, defaultPick, groupOverlaps, nextClass, startOn, type ClassMeeting } from "./schedule.ts";
 import { formatCourseCode, searchCourses, sectionChoices, type CourseSections, type SectionsData } from "./sections.ts";
 import { TransitNetwork, type TransitData } from "./transit.ts";
 import { checkBusRoute, planRoute } from "./plan.ts";
 import { transitOptions } from "./transitOptions.ts";
-import { EdgeKind, type Building, type GraphData, type IndoorData, type LngLat } from "./types.ts";
+import { buildSteps } from "./instructions.ts";
+import { BikeDir, EdgeKind, type Building, type GraphData, type IndoorData, type LngLat } from "./types.ts";
 
 // Small synthetic graph, ~111 m per 0.001° of latitude:
 //
@@ -52,6 +53,90 @@ describe("free points", () => {
     expect(p.route.meters).toBeGreaterThan(540);
     expect(p.route.meters).toBeLessThan(570);
     expect(p.route.coordinates[0][1]).toBeCloseTo(0.005, 4);
+  });
+});
+
+describe("what walkers keep off", () => {
+  // 0 ── direct (~222 m) ── 2, or a footpath detour 0 ── 1 ── 2 bowing out `bow` degrees.
+  const choice = (direct: EdgeKind, bow: number) =>
+    new CampusGraph({
+      ...tiny,
+      coords: [0, 0, 0.001, bow, 0.002, 0, 0.001, 0],
+      edges: [0, 1, EdgeKind.Path, 1, 2, EdgeKind.Path, 0, 3, direct, 3, 2, direct],
+    });
+  const takesDirect = (g: CampusGraph) => findRoute(g, 0, [2], { profile: PROFILES.walk })!.coordinates.some(([lon, lat]) => lon === 0.001 && lat === 0);
+
+  it("takes a bike path only for a real time saving", () => {
+    // Footpath ~4% longer: stay on it.
+    expect(takesDirect(choice(EdgeKind.Bike, 0.0003))).toBe(false);
+    // Footpath ~80% longer: the bike path is worth it.
+    expect(takesDirect(choice(EdgeKind.Bike, 0.0015))).toBe(true);
+  });
+
+  it("walks the long way round rather than along a road with no sidewalk", () => {
+    expect(takesDirect(choice(EdgeKind.Road, 0.0015))).toBe(false);
+    expect(takesDirect(choice(EdgeKind.Sidewalk, 0.0015))).toBe(true);
+  });
+});
+
+describe("cyclists keep right", () => {
+  // A divided road: two one-way carriageways between 0 (south) and 2 (north), the east one
+  // northbound (0 -> 1 -> 2), the west one southbound (2 -> 3 -> 0), each ~225 m; the sides
+  // bow out by `east` and `west` degrees, so one can be made a little longer.
+  const divided = (
+    kind: EdgeKind,
+    dir: number[] = [BikeDir.NoBackward, BikeDir.NoBackward, BikeDir.NoBackward, BikeDir.NoBackward],
+    east = 0.0002,
+    west = 0.0002,
+  ) =>
+    new CampusGraph({
+      ...tiny,
+      coords: [0, 0, east, 0.001, 0, 0.002, -west, 0.001],
+      edges: [0, 1, kind, 1, 2, kind, 2, 3, kind, 3, 0, kind],
+      bikeDir: dir,
+    });
+  const east = (r: Route) => r.coordinates.some(([lon]) => lon > 0);
+
+  it("rides each carriageway only with the traffic", () => {
+    // The west side is longer, but going south it's the one to ride.
+    const g = divided(EdgeKind.BikeOnly, undefined, 0.0002, 0.0004);
+    expect(east(findRoute(g, 0, [2], { profile: PROFILES.bike })!)).toBe(true);
+    expect(east(findRoute(g, 2, [0], { profile: PROFILES.bike })!)).toBe(false);
+    // Without the one-way, the shorter east side would do.
+    expect(east(findRoute(divided(EdgeKind.BikeOnly, [0, 0, 0, 0], 0.0002, 0.0004), 2, [0], { profile: PROFILES.bike })!)).toBe(true);
+    // Walkers don't care which side.
+    const w = divided(EdgeKind.Sidewalk);
+    expect(findRoute(w, 2, [0], { profile: PROFILES.walk })).not.toBeNull();
+  });
+
+  it("never rides the wrong way; walks the bike where there's a sidewalk", () => {
+    // Only the east carriageway, northbound: southbound there's no riding it at all...
+    const one = new CampusGraph({ ...tiny, coords: [0, 0, 0.0002, 0.001, 0, 0.002], edges: [0, 1, EdgeKind.BikeOnly, 1, 2, EdgeKind.BikeOnly], components: [0, 0, 0], bikeComponents: [0, 0, 0], bikeDir: [BikeDir.NoBackward, BikeDir.NoBackward] });
+    expect(findRoute(one, 2, [0], { profile: PROFILES.bike })).toBeNull();
+    // ...but with a sidewalk you get off and walk it.
+    const walkable = new CampusGraph({ ...tiny, coords: [0, 0, 0.0002, 0.001, 0, 0.002], edges: [0, 1, EdgeKind.Sidewalk, 1, 2, EdgeKind.Sidewalk], components: [0, 0, 0], bikeComponents: [0, 0, 0], bikeDir: [BikeDir.NoBackward, BikeDir.NoBackward] });
+    const r = findRoute(walkable, 2, [0], { profile: PROFILES.bike })!;
+    const leg = r.legs[0];
+    expect(leg.mode === "bike" && leg.pushMeters).toBeGreaterThan(200);
+    expect(buildSteps(walkable, r, "there")[0].text).toMatch(/^Walk your bike/);
+  });
+
+  it("prefers a road with a bike lane in its direction", () => {
+    // Two-way roads; the east one is a little longer but has a northbound lane.
+    const g = divided(EdgeKind.BikeOnly, [BikeDir.LaneForward, BikeDir.LaneForward, 0, 0], 0.0003, 0.0002);
+    expect(east(findRoute(g, 0, [2], { profile: PROFILES.bike })!)).toBe(true);
+    // Lanes on both sides, each for riding along its edges: northbound on the east side,
+    // southbound (2 -> 3 -> 0) on the west. Going south, only the west one helps.
+    const h = divided(EdgeKind.BikeOnly, [BikeDir.LaneForward, BikeDir.LaneForward, BikeDir.LaneForward, BikeDir.LaneForward], 0.0002, 0.0003);
+    expect(east(findRoute(h, 2, [0], { profile: PROFILES.bike })!)).toBe(false);
+  });
+
+  it("draws rides along roads on the right-hand side", () => {
+    const g = divided(EdgeKind.BikeOnly);
+    const r = findRoute(g, 0, [2], { profile: PROFILES.bike })!;
+    const runs = rideRuns(g, PROFILES.bike, r.legs[0] as MoveLeg);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].keepRight).toBe(true);
   });
 });
 

@@ -2,7 +2,7 @@ import { distanceMeters } from "./geo.ts";
 import type { CampusGraph } from "./graph.ts";
 import type { BusLeg, MoveLeg, Route } from "./route.ts";
 import { routeLabel } from "./transit.ts";
-import { EdgeKind, type LngLat } from "./types.ts";
+import { BikeDir, EdgeKind, type LngLat } from "./types.ts";
 
 export type Maneuver =
   | "depart"
@@ -82,7 +82,15 @@ function moveSteps(graph: CampusGraph, leg: MoveLeg, offset: number, first: bool
   const name = (i: number) => (leg.edges[i] >= 0 ? graph.edgeName(leg.edges[i]) : undefined); // edge i: c[i] -> c[i+1]
   const kind = (i: number) => (leg.edges[i] >= 0 ? graph.kind(leg.edges[i]) : EdgeKind.Path);
   const bike = leg.mode === "bike";
-  const rawPush = (i: number) => bike && (kind(i) === EdgeKind.Path || kind(i) === EdgeKind.Custom || kind(i) === EdgeKind.Steps);
+  // The wrong way down a one-way: no riding (cyclists keep right), so walk it.
+  const against = (i: number) => {
+    const e = leg.edges[i];
+    if (e < 0) return false;
+    const forward = graph.edgeFrom[e] === leg.nodes[i];
+    return (graph.edgeBikeDir[e] & (forward ? BikeDir.NoForward : BikeDir.NoBackward)) !== 0;
+  };
+  const rawPush = (i: number) =>
+    bike && (kind(i) === EdgeKind.Path || kind(i) === EdgeKind.Custom || kind(i) === EdgeKind.Steps || against(i));
   // Only stretches of footpath long enough to matter get "walk your bike" instructions.
   const pushRun: boolean[] = [];
   for (let i = 0; i < c.length - 1; ) {
@@ -117,7 +125,12 @@ function moveSteps(graph: CampusGraph, leg: MoveLeg, offset: number, first: bool
       continue;
     }
     if (bike && pushing(i) && !pushing(i - 1) && nextKind !== EdgeKind.Steps) {
-      push(out, { maneuver: "walk-bike", text: `Get off and walk your bike${name(i) ? ` along ${name(i)}` : " on the footpath"}`, at: c[i], along });
+      const where = against(i)
+        ? `${kind(i) === EdgeKind.Sidewalk ? " on the sidewalk" : ""}${name(i) ? ` along ${name(i)}` : ""} (one-way the other way)`
+        : name(i)
+          ? ` along ${name(i)}`
+          : " on the footpath";
+      push(out, { maneuver: "walk-bike", text: `Get off and walk your bike${where}`, at: c[i], along });
       continue;
     }
     if (bike && !pushing(i) && pushing(i - 1)) {

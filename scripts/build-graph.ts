@@ -7,6 +7,10 @@
  *      buildings in data/custom-paths.geojson
  *   4. roads pruned to the stretches that are the only link to a campus building or
  *      shuttle stop; pieces of network with no building or stop on them dropped
+ *   4b. UC San Diego's surveyed ground plan (sidewalks, walking paths, bike paths and streets
+ *      from the Campus Map; cached in data/raw/ucsd-ground.json): walkways OSM is missing
+ *      traced in, footpaths that are really bike paths marked as such, and roads OSM doesn't
+ *      tag checked for a sidewalk alongside
  *   5. UC San Diego's building list (official names, codes and footprints from the
  *      public Campus Map, used with the campus GIS team's OK; cached in
  *      data/raw/ucsd-buildings.geojson): aliases for buildings OSM has, and the
@@ -19,6 +23,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  BikeDir,
   EdgeKind,
   haversine,
   type Building,
@@ -36,12 +41,14 @@ import {
   type TransitPattern,
 } from "@campus/core";
 import { readGtfs, toSeconds, type Row } from "./gtfs.ts";
+import { Cell, fetchGround, GroundGrid, traceMissing, type GroundShape } from "./ground.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RAW_OSM = join(ROOT, "data/raw/osm.json");
 const RAW_GTFS_DIR = join(ROOT, "data/raw/gtfs");
 const RAW_UCSD = join(ROOT, "data/raw/ucsd-buildings.geojson");
 const RAW_UCSD_POINTS = join(ROOT, "data/raw/ucsd-building-points.geojson");
+const RAW_GROUND = join(ROOT, "data/raw/ucsd-ground.json");
 /** Building footprints from UC San Diego's public Campus Map (campusmap.ucsd.edu). */
 const UCSD_BUILDINGS = "https://admin-enterprise-gis.ucsd.edu/server/rest/services/AdministrationServices/Buildings_Public/MapServer";
 const UCSD_QUERY = "/query?where=1%3D1&outFields=OBJECTID,FacilityLongName,BuildingAliases&outSR=4326&resultRecordCount=2000&f=geojson";
@@ -97,8 +104,17 @@ type Feed = (typeof FEEDS)[number];
 
 /** Custom-path vertices this close to an existing node join it instead of making a new one. */
 const SNAP_METERS = 4;
-/** While choosing which roads to keep, a road meter counts as this many path meters. */
-const ROAD_AVOIDANCE = 8;
+/** While choosing which roads to keep, a road meter counts as this many path meters: high
+ *  enough that a road without a sidewalk stays only where nothing else gets there. */
+const ROAD_AVOIDANCE = 1000;
+/** Ground already this close to a mapped path isn't traced again. */
+const TRACE_COVER_METERS = 3.5;
+/** A traced walkway this close to a mapped path for nearly its whole length is that path, misaligned. */
+const TRACE_ALONGSIDE_METERS = 9;
+/** A traced walkway that runs into a mapped path joins it at the nearest point within this. */
+const TRACE_JOIN_METERS = 6;
+/** How far out from a road's centre line to look for its sidewalk. */
+const SIDEWALK_REACH_METERS = 14;
 /** A shuttle stop further than this from any path isn't usable on foot. */
 const STOP_SNAP_METERS = 150;
 
@@ -116,13 +132,38 @@ const LIKELY_SIDEWALK = new Set([
   "residential", "living_street", "unclassified", "tertiary", "tertiary_link", "secondary", "secondary_link",
 ]);
 
-/** Whether walking along this road means a sidewalk on it (not one mapped as its own footway). */
-function hasSidewalk(tags: Record<string, string>): boolean {
+/** Service roads that are never walked along: parking lot aisles, driveways, drive-throughs. */
+const NO_SIDEWALK_SERVICE = new Set(["parking_aisle", "driveway", "drive-through"]);
+
+/** What the road's sidewalk tags say about walking along it, or undefined when it has none. */
+function sidewalkTag(tags: Record<string, string>): boolean | undefined {
   const sides = [tags.sidewalk, tags["sidewalk:both"], tags["sidewalk:left"], tags["sidewalk:right"]].filter(Boolean);
   if (sides.some((v) => ["both", "left", "right", "yes"].includes(v))) return true;
   // "separate": drawn as its own footway, already in the graph; "no"/"none": nowhere to walk.
   if (sides.length) return false;
-  return tags.highway === "living_street" || LIKELY_SIDEWALK.has(tags.highway);
+  return undefined;
+}
+
+/** Whether walking along this road means a sidewalk on it (not one mapped as its own footway). */
+function hasSidewalk(tags: Record<string, string>): boolean {
+  return sidewalkTag(tags) ?? (tags.highway === "living_street" || LIKELY_SIDEWALK.has(tags.highway));
+}
+
+/**
+ * Whether UCSD's ground plan shows a sidewalk or walkway along this stretch of road (on either
+ * side, for at least half of it), or undefined where the plan doesn't cover the road.
+ */
+function sidewalkOnGround(ground: GroundGrid, line: LngLat[]): boolean | undefined {
+  const pts = densify(line, 5);
+  let known = 0;
+  let walk = 0;
+  for (const p of pts) {
+    if (!ground.near(p, 3, Cell.Known)) continue;
+    known++;
+    if (ground.near(p, SIDEWALK_REACH_METERS, Cell.Sidewalk | Cell.Walk)) walk++;
+  }
+  if (known < pts.length / 2) return undefined;
+  return walk >= known / 2;
 }
 
 interface OsmNode { type: "node"; id: number; lat: number; lon: number; tags?: Record<string, string> }
@@ -152,8 +193,8 @@ interface RawBuilding {
   extraAliases?: string[];
 }
 
-/** [from, to, kind, bikes allowed, index into the path-name table or -1] */
-type Edge = [number, number, EdgeKind, boolean, number];
+/** [from, to, kind, bikes allowed, index into the path-name table or -1, BikeDir flags] */
+type Edge = [number, number, EdgeKind, boolean, number, number];
 
 const walkable = (kind: EdgeKind) => kind !== EdgeKind.BikeOnly;
 
@@ -165,6 +206,11 @@ async function main() {
     const path = join(RAW_GTFS_DIR, `${feed.id}.zip`);
     if (refresh || !existsSync(path)) await fetchFeed(feed, path);
   }
+  if (refresh || !existsSync(RAW_GROUND)) {
+    console.log("Fetching the UCSD Campus Map ground plan ...");
+    writeFileSync(RAW_GROUND, JSON.stringify(await fetchGround(BBOX)));
+  }
+  const ground = groundGrid(JSON.parse(readFileSync(RAW_GROUND, "utf8")));
 
   const raw = JSON.parse(readFileSync(RAW_OSM, "utf8")) as { elements: OsmElement[]; osm3s?: { timestamp_osm_base?: string } };
   const blocked = new Set<number>(existsSync(BLOCKED_PATH) ? JSON.parse(readFileSync(BLOCKED_PATH, "utf8")) : []);
@@ -191,12 +237,12 @@ async function main() {
     if (id === undefined) nameIds.set(name, (id = names.push(name) - 1));
     return id;
   };
-  const addEdge = (a: number, b: number, kind: EdgeKind, bikeOk = true, name = -1) => {
+  const addEdge = (a: number, b: number, kind: EdgeKind, bikeOk = true, name = -1, dir = 0) => {
     if (a === b) return;
     const key = a < b ? `${a}-${b}` : `${b}-${a}`;
     if (edgeKeys.has(key)) return;
     edgeKeys.add(key);
-    edges.push([a, b, kind, bikeOk, name]);
+    edges.push([a, b, kind, bikeOk, name, dir]);
   };
   // Which level each node is on (ground, a bridge, a tunnel, indoors), so paths on different
   // levels that pass close in plan view aren't joined.
@@ -212,19 +258,30 @@ async function main() {
   };
 
   let blockedCount = 0;
+  const sidewalkChecks = { yes: 0, no: 0 };
   for (const way of ways) {
     if (!way.tags?.highway) continue;
     const classified = edgeKind(way.tags);
     if (classified === null) continue;
     const { kind, bikeOk } = classified;
+    const dir = bikeDirection(way.tags);
     if (blocked.has(way.id)) {
       blockedCount++;
       continue;
     }
+    // Roads OSM doesn't say about: does the ground plan show a sidewalk along each stretch?
+    // (Not parking aisles or driveways: a sidewalk round the lot isn't one along the aisle.)
+    const askGround =
+      (kind === EdgeKind.Sidewalk || kind === EdgeKind.Road) &&
+      sidewalkTag(way.tags) === undefined &&
+      !NO_SIDEWALK_SERVICE.has(way.tags.service ?? "");
     for (let k = 0; k + 1 < way.nodes.length; k++) {
       const a = osmNode(way.nodes[k], way.geometry[k].lon, way.geometry[k].lat);
       const b = osmNode(way.nodes[k + 1], way.geometry[k + 1].lon, way.geometry[k + 1].lat);
-      addEdge(a, b, kind, bikeOk, nameId(way.tags.name));
+      const onGround = askGround ? sidewalkOnGround(ground, [coords[a], coords[b]]) : undefined;
+      if (onGround !== undefined) sidewalkChecks[onGround ? "yes" : "no"]++;
+      const segKind = onGround === undefined ? kind : onGround ? EdgeKind.Sidewalk : EdgeKind.Road;
+      addEdge(a, b, segKind, bikeOk, nameId(way.tags.name), dir);
       onLevel(a, levelKey(way.tags));
       onLevel(b, levelKey(way.tags));
     }
@@ -250,6 +307,9 @@ async function main() {
     }
     customCount++;
   }
+
+  // --- UCSD's ground plan: footpaths that are really bike paths, and walkways OSM is missing.
+  const traced = addGroundPaths(ground, { coords, edges, edgeKeys, index, nodeLevels, addEdge });
 
   // --- Campus boundary and campus buildings.
   const campusRings = [
@@ -429,38 +489,47 @@ async function main() {
     gtfs.stops.filter((s) => !s.location_type || s.location_type === "0").map((s) => [Number(s.stop_lon), Number(s.stop_lat)] as LngLat),
   );
 
-  // --- Keep only the roads that are the sole link to a campus building or stop:
-  // the shortest-path tree from central campus, with roads heavily discouraged.
   // --- Stepping across: footpaths that come within a few meters of each other without meeting
   // in OSM (a path ending just short of another, two paths side by side) get a short link, unless
   // the walk between them is already short. Never across levels or through a building wall.
   const stepAcross = addStepAcross(coords, edges, index, nodeLevels, rawBuildings);
   for (const [a, b] of stepAcross) addEdge(a, b, EdgeKind.Path, false);
 
+  // --- Roads without a sidewalk aren't for walking. Keep one only where it's the sole link to a
+  // campus building or stop: the shortest-path tree from central campus, roads all but ruled out.
   const required = new Set<number>();
-  for (const b of campusBuildings) targetsOf(b, () => true).targets.forEach((t) => required.add(t));
+  const buildingTargets = campusBuildings.map((b) => targetsOf(b, () => true).targets);
+  buildingTargets.flat().forEach((t) => required.add(t));
   const pointPlaces = [
     ...custom.features.flatMap((f) => (f.geometry?.type === "Point" && f.properties?.name ? [f.geometry.coordinates as LngLat] : [])),
     ...ucsdPoints.filter((p) => inCampus(p.at)).map((p) => p.at),
   ];
+  // Places and stops hang off a walkway where there is one in reach, not off a road beside it.
+  const onWalkway = new Uint8Array(coords.length);
+  for (const [a, b, kind] of edges) if (walkable(kind) && kind !== EdgeKind.Road) onWalkway[a] = onWalkway[b] = 1;
+  const snap = (p: LngLat, meters: number) => {
+    const i = index.nearest(p, meters, (i) => onWalkway[i] === 1);
+    return i !== -1 ? i : index.nearest(p, meters);
+  };
+  const needed: number[] = [];
   for (const at of pointPlaces) {
-    const i = index.nearest(at, 80);
-    if (i !== -1) required.add(i);
+    const i = snap(at, 80);
+    if (i !== -1) required.add(i), needed.push(i);
   }
   for (const p of stopPositions) {
-    const i = index.nearest(p, STOP_SNAP_METERS);
-    if (i !== -1) required.add(i);
+    const i = snap(p, STOP_SNAP_METERS);
+    if (i !== -1) required.add(i), needed.push(i);
   }
 
   const hubBuilding = campusBuildings.find((b) => b.name === "Price Center") ?? campusBuildings[0];
   const hub = targetsOf(hubBuilding, () => true).targets[0];
-  const prevEdge = shortestPathTree(coords, edges, hub, (kind) =>
-    kind === EdgeKind.Road ? ROAD_AVOIDANCE : walkable(kind) ? 1 : Infinity,
-  );
+  const tree = shortestPathTree(coords, edges, hub, (kind) => (kind === EdgeKind.Road ? ROAD_AVOIDANCE : walkable(kind) ? 1 : Infinity));
+  // A building needs just one way in: its cheapest-to-reach target.
+  for (const ts of buildingTargets) if (ts.length) needed.push(ts.reduce((x, y) => (tree.dist[y] < tree.dist[x] ? y : x)));
   const usedRoads = new Set<number>();
-  for (const r of required) {
-    for (let v = r; prevEdge[v] !== -1; ) {
-      const e = prevEdge[v];
+  for (const r of needed) {
+    for (let v = r; tree.prev[v] !== -1; ) {
+      const e = tree.prev[v];
       if (edges[e][2] === EdgeKind.Road) usedRoads.add(e);
       v = edges[e][0] === v ? edges[e][1] : edges[e][0];
     }
@@ -469,7 +538,7 @@ async function main() {
   // Other roads stay for cycling only (unless bikes are banned on them).
   edges = edges.flatMap((e, i): Edge[] => {
     if (e[2] !== EdgeKind.Road || usedRoads.has(i)) return [e];
-    return e[3] ? [[e[0], e[1], EdgeKind.BikeOnly, true, e[4]]] : [];
+    return e[3] ? [[e[0], e[1], EdgeKind.BikeOnly, true, e[4], e[5]]] : [];
   });
 
   // Drop walking pieces with no building, stop or hand-traced path on them, and
@@ -485,7 +554,7 @@ async function main() {
   for (const [a, b] of edges) remap[a] = remap[b] = 0;
   const finalCoords: LngLat[] = [];
   for (let i = 0; i < coords.length; i++) if (remap[i] === 0) remap[i] = finalCoords.push(coords[i]) - 1;
-  const finalEdges = edges.map(([a, b, k, bike, nm]): Edge => [remap[a], remap[b], k, bike, nm]);
+  const finalEdges = edges.map(([a, b, k, bike, nm, dir]): Edge => [remap[a], remap[b], k, bike, nm, dir]);
   // Walking connectivity ignores bike-only edges; riding connectivity uses everything.
   const comps = components(finalCoords.length, finalEdges.filter((e) => walkable(e[2])));
   const bikeComps = components(finalCoords.length, finalEdges);
@@ -516,6 +585,20 @@ async function main() {
     const owner = owners.sort((a, b) => size(a) - size(b))[0];
     if (owner) indoorOwner.set(r, owner);
   }
+  // Ride-only road nodes beside a building: where a bike can pull up when no walkway gets there.
+  const rideOnly = new Uint8Array(finalCoords.length);
+  for (const [a, b, k] of finalEdges) if (k === EdgeKind.BikeOnly) rideOnly[a] = rideOnly[b] = 1;
+  const rideExits = (b: RawBuilding, walkTargets: number[]) => {
+    const near = new Set<number>();
+    const accept = (i: number) => kept(i) && rideOnly[remap[i]] === 1 && bikeComps.id[remap[i]] === mainBikeComponent;
+    for (const line of b.lines) {
+      for (const p of densify(line, 10)) {
+        const i = index.nearest(p, 15, accept);
+        if (i !== -1 && !walkTargets.includes(remap[i])) near.add(remap[i]);
+      }
+    }
+    return [...near];
+  };
   for (const b of campusBuildings) {
     // Prefer doors on the main network; else a piece a shuttle serves.
     let { targets, entranceCount } = targetsOf(b, onMain);
@@ -526,6 +609,7 @@ async function main() {
       unreachable.push(b.name);
       continue;
     }
+    const rideTargets = rideExits(b, finalTargets);
     const aliases = [
       ...["short_name", "alt_name", "abbr_name", "official_name", "old_name", "ref", "loc_name", "name:en"].flatMap((k) =>
         b.tags[k] ? b.tags[k].split(";").map((s) => s.trim()) : [],
@@ -565,6 +649,7 @@ async function main() {
       aliases: [...new Set(aliases)],
       center: [round(b.center[0]), round(b.center[1])],
       targets: finalTargets,
+      ...(rideTargets.length ? { rideTargets } : {}),
       entranceCount,
       access: walkable ? "walk" : "shuttle",
       ...(doors.length ? { entrances: doors } : {}),
@@ -682,6 +767,7 @@ async function main() {
     mainComponent,
     bikeComponents: Array.from(bikeComps.id),
     mainBikeComponent,
+    bikeDir: finalEdges.map((e) => e[5]),
     names,
     edgeNames: finalEdges.map((e) => e[4]),
   };
@@ -704,8 +790,12 @@ async function main() {
   console.log(
     [
       `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; step-across links: ${stepAcross.length}; walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
+      `riding: ${finalEdges.filter((e) => e[5] & (BikeDir.NoForward | BikeDir.NoBackward)).length} one-way segments (ridden only with the traffic), ` +
+        `${finalEdges.filter((e) => e[5] & (BikeDir.LaneForward | BikeDir.LaneBackward)).length} with a bike lane (${finalEdges.filter((e) => (e[5] & BikeDir.LaneForward) !== 0 !== ((e[5] & BikeDir.LaneBackward) !== 0)).length} one side only)`,
       `walking network: ${new Set(Array.from(comps.id).filter((_, i) => walkNode[i])).size} pieces (main: ${mainSize} nodes); riding network main: ${bikeComps.size[mainBikeComponent]} nodes`,
       `blocked ways ${blockedCount}, custom paths ${customCount}`,
+      `UCSD ground plan: ${traced.paths} walkways traced in (${(traced.meters / 1000).toFixed(1)} km, ${traced.bikePaths} of them bike paths, ${traced.joins} joins onto mapped paths); ` +
+        `${traced.toBike} footpath segments marked bike path; untagged road segments with a sidewalk ${sidewalkChecks.yes}, without ${sidewalkChecks.no}`,
       process.env.VERBOSE ? `matched by shape, names differ: ${differentNames.join("; ")}` : "",
       `UCSD building list: ${ucsdMatched} matched to OSM buildings (${differentNames.length} by shape), ${ucsdAdded} added from UCSD footprints`,
       `campus buildings ${buildings.length}: ${count("walk")} on foot, ${count("shuttle")} shuttle-only, ` +
@@ -932,8 +1022,47 @@ function edgeKind(tags: Record<string, string>): { kind: EdgeKind; bikeOk: boole
   return null;
 }
 
-/** Dijkstra from `source`; returns the edge used to reach each node (-1 if none). */
-function shortestPathTree(coords: LngLat[], edges: Edge[], source: number, weight: (kind: EdgeKind) => number): Int32Array {
+/**
+ * Which way a cyclist may ride a way, and which way its bike lanes go (BikeDir flags, forward =
+ * along the way). Traffic keeps right: a two-way road's right-hand lane (`cycleway:right`) is
+ * for riding forward and its left-hand one for riding back; on a one-way, both go with traffic.
+ */
+function bikeDirection(t: Record<string, string>): number {
+  const lane = (v?: string) => v === "lane" || v === "track";
+  const sides = [t.cycleway, t["cycleway:both"], t["cycleway:left"], t["cycleway:right"]];
+  // Contraflow: bikes allowed both ways on a one-way.
+  const contraflow = t["oneway:bicycle"] === "no" || sides.some((v) => v?.startsWith("opposite"));
+  const oneway = contraflow
+    ? "no"
+    : (t["oneway:bicycle"] ?? t.oneway ?? (t.junction === "roundabout" || t.junction === "circular" ? "yes" : "no"));
+  const reverse = oneway === "-1" || oneway === "reverse";
+  const one = reverse || oneway === "yes" || oneway === "true" || oneway === "1";
+  // Flags as if the way ran in its direction of travel, then flipped for oneway=-1.
+  let ahead = 0;
+  let back = 0;
+  if (lane(t.cycleway) || lane(t["cycleway:both"])) [ahead, back] = [1, 1];
+  if (lane(t["cycleway:right"])) ahead = 1;
+  if (lane(t["cycleway:left"])) one ? (ahead = 1) : (back = 1);
+  if (t["cycleway:left"] === "opposite_lane" || t["cycleway:right"] === "opposite_lane" || t.cycleway === "opposite_lane") back = 1;
+  const flags = (one ? BikeDir.NoBackward : 0) | (ahead ? BikeDir.LaneForward : 0) | (back ? BikeDir.LaneBackward : 0);
+  return reverse ? swapDirection(flags) : flags;
+}
+
+function swapDirection(flags: number): number {
+  const pairs = [
+    [BikeDir.NoForward, BikeDir.NoBackward],
+    [BikeDir.LaneForward, BikeDir.LaneBackward],
+  ];
+  return pairs.reduce((out, [f, b]) => out | (flags & f ? b : 0) | (flags & b ? f : 0), 0);
+}
+
+/** Dijkstra from `source`: each node's weighted distance and the edge used to reach it (-1 if none). */
+function shortestPathTree(
+  coords: LngLat[],
+  edges: Edge[],
+  source: number,
+  weight: (kind: EdgeKind) => number,
+): { dist: Float64Array; prev: Int32Array } {
   const adj: [number, number][][] = coords.map(() => []);
   edges.forEach(([a, b], e) => {
     adj[a].push([b, e]);
@@ -957,7 +1086,7 @@ function shortestPathTree(coords: LngLat[], edges: Edge[], source: number, weigh
       }
     }
   }
-  return prev;
+  return { dist, prev };
 }
 
 class Heap {
@@ -1029,7 +1158,8 @@ function components(n: number, edges: Edge[]) {
 function levelKey(t: Record<string, string>): string {
   const on = (v?: string) => !!v && v !== "no";
   if (on(t.bridge)) return `bridge${t.layer ?? 1}`;
-  if (on(t.tunnel)) return `tunnel${t.layer ?? -1}`;
+  // A passage through a building is at ground level; a real tunnel is below it.
+  if (on(t.tunnel) && t.tunnel !== "building_passage") return `tunnel${t.layer ?? -1}`;
   if (t.indoor === "yes" || t.highway === "corridor" || t.level !== undefined) return `indoor${t.level ?? ""}`;
   return `ground${t.layer ?? 0}`;
 }
@@ -1109,6 +1239,184 @@ function addStepAcross(
     links.push([i, j]);
   }
   return links;
+}
+
+/** The ground plan as a raster over the part of the area it covers. */
+function groundGrid(shapes: GroundShape[]): GroundGrid {
+  let [s, w, n, e]: number[] = [BBOX[2], BBOX[3], BBOX[0], BBOX[1]];
+  for (const shape of shapes) {
+    for (const ring of shape.rings) {
+      for (const [lon, lat] of ring) [s, w, n, e] = [Math.min(s, lat), Math.min(w, lon), Math.max(n, lat), Math.max(e, lon)];
+    }
+  }
+  const box = [Math.max(s, BBOX[0]), Math.max(w, BBOX[1]), Math.min(n, BBOX[2]), Math.min(e, BBOX[3])] as const;
+  return GroundGrid.from(box, shapes);
+}
+
+/**
+ * Brings in what UCSD's ground plan knows and OSM doesn't:
+ *   - footpath segments lying on a surveyed bike path become bike paths;
+ *   - walkable ground (walking paths, sidewalks, bike paths) with no mapped path within a few
+ *     meters is traced to centre lines and added, joined onto the mapped paths it runs into.
+ * Only ground-level paths count: a tunnel or bridge doesn't cover the walkway above or below it,
+ * and nothing traced joins one. (A walkway the ground plan shows under a roof is an open
+ * passage at ground level, so it's kept.)
+ */
+function addGroundPaths(
+  ground: GroundGrid,
+  g: {
+    coords: LngLat[];
+    edges: Edge[];
+    edgeKeys: Set<string>;
+    index: PointIndex;
+    nodeLevels: Map<number, Set<string>>;
+    addEdge: (a: number, b: number, kind: EdgeKind, bikeOk?: boolean) => void;
+  },
+) {
+  const { coords, edges, edgeKeys, index, nodeLevels, addEdge } = g;
+  const onGround = (i: number) => {
+    const levels = nodeLevels.get(i);
+    return !levels || [...levels].some((l) => l.startsWith("ground"));
+  };
+  const groundWalk = (e: Edge) => walkable(e[2]) && e[2] !== EdgeKind.Road && onGround(e[0]) && onGround(e[1]);
+
+  // Footpaths on a bike path.
+  let toBike = 0;
+  for (const e of edges) {
+    if ((e[2] !== EdgeKind.Path && e[2] !== EdgeKind.Shared) || !groundWalk(e)) continue;
+    const pts = densify([coords[e[0]], coords[e[1]]], 2);
+    const onBike = pts.filter((p) => {
+      const [x, y] = ground.toCell(p);
+      return ground.near(p, 1.5, Cell.Bike) && !(ground.at(x, y) & (Cell.Walk | Cell.Sidewalk));
+    }).length;
+    if (onBike >= 0.6 * pts.length) {
+      e[2] = EdgeKind.Bike;
+      e[3] = true;
+      toBike++;
+    }
+  }
+
+  // What the mapped paths already cover, then trace the rest.
+  for (const e of edges) {
+    if (!groundWalk(e)) continue;
+    ground.stroke(coords[e[0]], coords[e[1]], TRACE_COVER_METERS, Cell.Covered);
+    ground.stroke(coords[e[0]], coords[e[1]], TRACE_ALONGSIDE_METERS, Cell.Alongside);
+  }
+  // (OSM and the survey disagree by a few meters in places, mostly on trails: a trace running
+  // beside a mapped path the whole way is the same path again. Its ends don't count; a walkway
+  // joining a path starts next to it.)
+  const traces = traceMissing(ground, { minMeters: 12, spurMeters: 15, holeM2: 25 }).filter((t) => {
+    const step = 2;
+    const pts = densify(t.line, step).slice(TRACE_ALONGSIDE_METERS / step, -TRACE_ALONGSIDE_METERS / step);
+    if (pts.length < 10 / step) return true;
+    const alongside = pts.filter((p) => {
+      const [x, y] = ground.toCell(p);
+      return ground.at(x, y) & Cell.Alongside;
+    }).length;
+    return alongside < 0.85 * pts.length;
+  });
+
+  // Join points: the nearest point on a ground-level path (not stairs), splitting it there.
+  const segments = new SegmentIndex(coords);
+  const joinable = (e: Edge) => groundWalk(e) && e[2] !== EdgeKind.Steps;
+  edges.forEach((e, i) => joinable(e) && segments.add(i, e[0], e[1]));
+  const newNode = (p: LngLat) => {
+    const i = coords.push([round(p[0]), round(p[1])]) - 1;
+    index.add(i);
+    nodeLevels.set(i, new Set(["ground0"]));
+    return i;
+  };
+  let joins = 0;
+  const join = (p: LngLat): number => {
+    const hit = segments.nearest(p, TRACE_JOIN_METERS, (i) => joinable(edges[i]));
+    if (!hit) return -1;
+    joins++;
+    const [a, b, kind, bikeOk, name, dir] = edges[hit.edge];
+    const m = (i: number) => haversine(hit.at[0], hit.at[1], coords[i][0], coords[i][1]);
+    if (m(a) < 1.5) return a;
+    if (m(b) < 1.5) return b;
+    const n = newNode(hit.at);
+    edges[hit.edge] = [a, n, kind, bikeOk, name, dir];
+    const added = edges.push([n, b, kind, bikeOk, name, dir]) - 1;
+    for (const key of [a < n ? `${a}-${n}` : `${n}-${a}`, n < b ? `${n}-${b}` : `${b}-${n}`]) edgeKeys.add(key);
+    segments.add(added, n, b);
+    return n;
+  };
+
+  // Traces meet each other at shared junction points.
+  const atJunction = new Map<string, number>();
+  let meters = 0;
+  let bikePaths = 0;
+  for (const t of traces) {
+    const kind = t.bikeShare > 0.5 ? EdgeKind.Bike : EdgeKind.Path;
+    if (kind === EdgeKind.Bike) bikePaths++;
+    const last = t.line.length - 1;
+    const nodes = t.line.map((p, k) => {
+      const end = k === 0 ? 0 : k === last ? 1 : -1;
+      if (end === -1) return newNode(p);
+      if (t.joins[end]) {
+        const j = join(p);
+        if (j !== -1) return j;
+      }
+      const key = `${p[0]},${p[1]}`;
+      return atJunction.get(key) ?? atJunction.set(key, newNode(p)).get(key)!;
+    });
+    for (let k = 1; k < nodes.length; k++) {
+      addEdge(nodes[k - 1], nodes[k], kind, kind === EdgeKind.Bike);
+      meters += haversine(coords[nodes[k - 1]][0], coords[nodes[k - 1]][1], coords[nodes[k]][0], coords[nodes[k]][1]);
+    }
+  }
+  return { paths: traces.length, meters, bikePaths, joins, toBike };
+}
+
+/** Segments (graph edges) by grid cell, for the nearest point on any of them. */
+class SegmentIndex {
+  private cells = new Map<string, number[]>();
+  private ends = new Map<number, [number, number]>();
+  constructor(
+    private coords: LngLat[],
+    private cellDeg = 0.0002,
+  ) {}
+  add(edge: number, a: number, b: number) {
+    this.ends.set(edge, [a, b]);
+    const [p, q] = [this.coords[a], this.coords[b]];
+    const c = (v: number) => Math.floor(v / this.cellDeg);
+    for (let x = c(Math.min(p[0], q[0])); x <= c(Math.max(p[0], q[0])); x++) {
+      for (let y = c(Math.min(p[1], q[1])); y <= c(Math.max(p[1], q[1])); y++) {
+        const k = `${x},${y}`;
+        (this.cells.get(k) ?? this.cells.set(k, []).get(k)!).push(edge);
+      }
+    }
+  }
+  /** Nearest point within maxMeters on an indexed segment passing `accept`. */
+  nearest(p: LngLat, maxMeters: number, accept: (edge: number) => boolean): { edge: number; at: LngLat } | null {
+    const kx = haversine(p[0], p[1], p[0] + 1e-4, p[1]) / 1e-4;
+    const ky = haversine(p[0], p[1], p[0], p[1] + 1e-4) / 1e-4;
+    const cx = Math.floor(p[0] / this.cellDeg);
+    const cy = Math.floor(p[1] / this.cellDeg);
+    const r = Math.ceil(maxMeters / 18) + 1;
+    let best: { edge: number; at: LngLat } | null = null;
+    let bestD = maxMeters;
+    const seen = new Set<number>();
+    for (let x = cx - r; x <= cx + r; x++) {
+      for (let y = cy - r; y <= cy + r; y++) {
+        for (const e of this.cells.get(`${x},${y}`) ?? []) {
+          if (seen.has(e) || !accept(e)) continue;
+          seen.add(e);
+          const [a, b] = this.ends.get(e)!.map((i) => this.coords[i]);
+          const [ax, ay] = [(a[0] - p[0]) * kx, (a[1] - p[1]) * ky];
+          const [dx, dy] = [(b[0] - a[0]) * kx, (b[1] - a[1]) * ky];
+          const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (dx * dx + dy * dy || 1)));
+          const d = Math.hypot(ax + t * dx, ay + t * dy);
+          if (d <= bestD) {
+            bestD = d;
+            best = { edge: e, at: [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])] };
+          }
+        }
+      }
+    }
+    return best;
+  }
 }
 
 /** Whether segments pq and rs properly cross. */
