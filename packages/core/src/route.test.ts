@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { distanceMeters } from "./geo.ts";
 import { CampusGraph } from "./graph.ts";
-import { PROFILES, findRoute, findRouteArriveBy, rideRuns, type MoveLeg, type Route } from "./route.ts";
+import { PROFILES, findRoute, findRouteArriveBy, rideRuns, usesGap, type MoveLeg, type Route } from "./route.ts";
 import { dayClasses, defaultPick, groupOverlaps, nextClass, startOn, type ClassMeeting } from "./schedule.ts";
 import { formatCourseCode, searchCourses, sectionChoices, type CourseSections, type SectionsData } from "./sections.ts";
 import { TransitNetwork, type TransitData } from "./transit.ts";
@@ -76,6 +76,42 @@ describe("what walkers keep off", () => {
   it("walks the long way round rather than along a road with no sidewalk", () => {
     expect(takesDirect(choice(EdgeKind.Road, 0.0015))).toBe(false);
     expect(takesDirect(choice(EdgeKind.Sidewalk, 0.0015))).toBe(true);
+  });
+});
+
+describe("cutting across open ground", () => {
+  // Two paths ~19 m apart: A (0 -> 1, north) and B (2 -> 3, south), with a cut 1 - 2 between
+  // them. Without it, the walk goes round via `round` (node 4 and beyond).
+  const lawn = (round: number[], roundEdges: number[]) =>
+    new CampusGraph({
+      ...tiny,
+      coords: [0, 0, 0, 0.001, 0.0002, 0.001, 0.0002, 0, ...round],
+      edges: [0, 1, EdgeKind.Path, 2, 3, EdgeKind.Path, 1, 2, EdgeKind.Gap, ...roundEdges],
+      components: Array(4 + round.length / 2).fill(0),
+      bikeComponents: Array(4 + round.length / 2).fill(0),
+    });
+  // The paths only meet ~220 m further north: going round is ~685 m against ~240 m across.
+  const farRound = lawn([0, 0.003, 0.0002, 0.003], [1, 4, EdgeKind.Path, 4, 5, EdgeKind.Path, 5, 2, EdgeKind.Path]);
+  // A short footpath bend joins them right there: ~30 m against ~19 m across.
+  const nearRound = lawn([0.0001, 0.0011], [1, 4, EdgeKind.Path, 4, 2, EdgeKind.Path]);
+  const across = (g: CampusGraph, r: Route | null) => !!r && usesGap(g, r);
+
+  it("cuts across when it saves a real part of the trip", () => {
+    const r = findRoute(farRound, 0, [3], { profile: PROFILES.walk });
+    expect(across(farRound, r)).toBe(true);
+    expect(r!.meters).toBeLessThan(260);
+    expect(buildSteps(farRound, r!, "there").some((s) => /cut across/.test(s.text))).toBe(true);
+  });
+
+  it("stays on the paths when the saving is small for the trip", () => {
+    // ~11 m (~8 s) shorter across: under a tenth of the trip and under 20 s.
+    const r = findRoute(nearRound, 0, [3], { profile: PROFILES.walk });
+    expect(across(nearRound, r)).toBe(false);
+  });
+
+  it("only on foot, and not when avoiding stairs", () => {
+    expect(across(farRound, findRoute(farRound, 0, [3], { profile: PROFILES.accessible }))).toBe(false);
+    expect(across(farRound, findRoute(farRound, 0, [3], { profile: PROFILES.bike }))).toBe(false);
   });
 });
 

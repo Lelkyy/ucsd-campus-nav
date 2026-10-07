@@ -69,7 +69,13 @@ const RIDE_SHARED = 3.5;
 /** Walking a bike where riding isn't allowed. */
 const PUSH = 1.2;
 
-const WALK_PREFER = { [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Bike]: 1.5, [EdgeKind.Road]: 10 };
+const WALK_PREFER = { [EdgeKind.Sidewalk]: 1.05, [EdgeKind.Bike]: 1.5, [EdgeKind.Road]: 10, [EdgeKind.Gap]: 1.25 };
+
+/**
+ * Cutting across open ground between paths (EdgeKind.Gap) has to be worth it for the trip as a
+ * whole: it must save this share of the trip's time, and at least this many seconds.
+ */
+export const GAP_MIN_SAVING = { share: 0.1, seconds: 20 };
 
 export const PROFILES = {
   walk: {
@@ -86,6 +92,7 @@ export const PROFILES = {
       // Climbing stairs is slower than walking the same distance on the flat.
       [EdgeKind.Steps]: WALK / 1.4,
       [EdgeKind.BikeOnly]: 0,
+      [EdgeKind.Gap]: WALK,
     },
     // Prefer footpaths, then sidewalks along roads. Bike paths only for a real time saving
     // (a third or more on that stretch); a road with no sidewalk only when nothing else goes there.
@@ -104,6 +111,8 @@ export const PROFILES = {
       [EdgeKind.Sidewalk]: WALK,
       [EdgeKind.Steps]: 0,
       [EdgeKind.BikeOnly]: 0,
+      // Lawns and fields aren't step-free ground.
+      [EdgeKind.Gap]: 0,
     },
     prefer: WALK_PREFER,
   },
@@ -122,6 +131,8 @@ export const PROFILES = {
       [EdgeKind.Custom]: PUSH,
       // Carrying a bike up or down stairs: possible, but only as a last resort.
       [EdgeKind.Steps]: 0.4,
+      // Cutting across the grass is for walkers.
+      [EdgeKind.Gap]: 0,
     },
     // Bike paths and bike lanes first, then quiet shared paths, then roads.
     prefer: { [EdgeKind.Road]: 1.15, [EdgeKind.Sidewalk]: 1.15, [EdgeKind.BikeOnly]: 1.2, [EdgeKind.Shared]: 1.05, [EdgeKind.Steps]: 3 },
@@ -173,6 +184,8 @@ export interface RouteOptions {
    */
   startCost?: ReadonlyMap<number, number>;
   targetCost?: ReadonlyMap<number, number>;
+  /** Stay on the paths: no cutting across open ground (EdgeKind.Gap). */
+  noGaps?: boolean;
 }
 
 /** A stretch on foot or by bike. */
@@ -237,6 +250,9 @@ type Step =
  * Time-dependent A* from `start` (one node, or any of several, e.g. a building's
  * exits) to whichever of `targets` is reached first, walking or riding the graph
  * and (optionally) taking shuttles on their timetable.
+ *
+ * A route may cut across open ground between paths only when that's worth it for the trip
+ * as a whole (GAP_MIN_SAVING); otherwise it stays on the paths.
  */
 export function findRoute(
   graph: CampusGraph,
@@ -244,6 +260,20 @@ export function findRoute(
   targets: number[],
   opts: RouteOptions = {},
 ): Route | null {
+  const across = search(graph, start, targets, opts);
+  if (!across || opts.noGaps || !usesGap(graph, across)) return across;
+  const onPaths = search(graph, start, targets, { ...opts, noGaps: true });
+  if (!onPaths) return across;
+  const saved = (onPaths.minutes - across.minutes) * 60;
+  return saved >= Math.max(GAP_MIN_SAVING.seconds, GAP_MIN_SAVING.share * onPaths.minutes * 60) ? across : onPaths;
+}
+
+/** Whether the route cuts across open ground anywhere. */
+export function usesGap(graph: CampusGraph, route: Route): boolean {
+  return route.legs.some((l) => l.mode !== "bus" && l.edges.some((e) => e >= 0 && graph.kind(e) === EdgeKind.Gap));
+}
+
+function search(graph: CampusGraph, start: number | number[], targets: number[], opts: RouteOptions): Route | null {
   const starts = Array.isArray(start) ? start : [start];
   const profile: Profile = opts.profile ?? PROFILES.walk;
   // Shuttles are only combined with walking.
@@ -314,6 +344,7 @@ export function findRoute(
     if (u < n) {
       for (let k = graph.adjStart[u]; k < graph.adjStart[u + 1]; k++) {
         const e = graph.adjEdge[k];
+        if (opts.noGaps && graph.kind(e) === EdgeKind.Gap) continue;
         const { speed, prefer } = edgeTravel(graph, profile, e, u);
         if (!speed) continue;
         const dt = graph.edgeLength[e] / speed;

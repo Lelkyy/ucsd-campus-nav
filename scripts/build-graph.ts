@@ -495,6 +495,12 @@ async function main() {
   const stepAcross = addStepAcross(coords, edges, index, nodeLevels, rawBuildings);
   for (const [a, b] of stepAcross) addEdge(a, b, EdgeKind.Path, false);
 
+  // --- Cutting across: walking straight over open ground (lawn, plaza, field) between paths
+  // up to 30 m apart whose own way round is much longer. The router takes one only when it
+  // saves a real part of the trip.
+  const gaps = addGaps(ground, coords, edges, index, nodeLevels);
+  for (const [a, b] of gaps) addEdge(a, b, EdgeKind.Gap, false);
+
   // --- Roads without a sidewalk aren't for walking. Keep one only where it's the sole link to a
   // campus building or stop: the shortest-path tree from central campus, roads all but ruled out.
   const required = new Set<number>();
@@ -545,7 +551,8 @@ async function main() {
   // riding pieces that don't connect to central campus.
   const preWalk = components(coords.length, edges.filter((e) => walkable(e[2])));
   const usefulComp = new Set([...required, ...customNodes].map((i) => preWalk.id[i]));
-  const preBike = components(coords.length, edges);
+  const rideable = (e: Edge) => e[2] !== EdgeKind.Gap;
+  const preBike = components(coords.length, edges.filter(rideable));
   const hubBikeComp = preBike.id[hub];
   edges = edges.filter(([a, , kind]) => (walkable(kind) ? usefulComp.has(preWalk.id[a]) : preBike.id[a] === hubBikeComp));
 
@@ -557,7 +564,7 @@ async function main() {
   const finalEdges = edges.map(([a, b, k, bike, nm, dir]): Edge => [remap[a], remap[b], k, bike, nm, dir]);
   // Walking connectivity ignores bike-only edges; riding connectivity uses everything.
   const comps = components(finalCoords.length, finalEdges.filter((e) => walkable(e[2])));
-  const bikeComps = components(finalCoords.length, finalEdges);
+  const bikeComps = components(finalCoords.length, finalEdges.filter(rideable));
   const mainComponent = comps.id[remap[hub]];
   const mainBikeComponent = bikeComps.id[remap[hub]];
   const kept = (i: number) => remap[i] !== -1;
@@ -789,7 +796,7 @@ async function main() {
   const count = (a: Building["access"]) => buildings.filter((b) => b.access === a).length;
   console.log(
     [
-      `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; step-across links: ${stepAcross.length}; walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
+      `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; step-across links: ${stepAcross.length}; cuts across open ground: ${finalEdges.filter((e) => e[2] === EdgeKind.Gap).length}; walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
       `riding: ${finalEdges.filter((e) => e[5] & (BikeDir.NoForward | BikeDir.NoBackward)).length} one-way segments (ridden only with the traffic), ` +
         `${finalEdges.filter((e) => e[5] & (BikeDir.LaneForward | BikeDir.LaneBackward)).length} with a bike lane (${finalEdges.filter((e) => (e[5] & BikeDir.LaneForward) !== 0 !== ((e[5] & BikeDir.LaneBackward) !== 0)).length} one side only)`,
       `walking network: ${new Set(Array.from(comps.id).filter((_, i) => walkNode[i])).size} pieces (main: ${mainSize} nodes); riding network main: ${bikeComps.size[mainBikeComponent]} nodes`,
@@ -1419,6 +1426,84 @@ class SegmentIndex {
   }
 }
 
+/** Longest cut across open ground between two paths. */
+const GAP_MAX_METERS = 30;
+/** A cut of `m` meters is added only where the paths between its ends take longer than this. */
+const gapDetour = (m: number) => 1.8 * m + 15;
+/** Each path point gets at most this many cuts (its shortest). */
+const GAPS_PER_NODE = 2;
+const GAP_END_KINDS = new Set<EdgeKind>([EdgeKind.Path, EdgeKind.Shared, EdgeKind.Bike, EdgeKind.Custom]);
+
+/**
+ * Cuts across open ground (see the call): pairs of footpath points 5-30 m apart, on the same
+ * level, with only walkable or open ground between them on UCSD's ground plan (no building,
+ * wall, planter, water, parking lot or street in the way), where the walk along the paths is
+ * much longer.
+ */
+function addGaps(
+  ground: GroundGrid,
+  coords: LngLat[],
+  edges: Edge[],
+  index: PointIndex,
+  nodeLevels: Map<number, Set<string>>,
+): [number, number][] {
+  const adj: [number, number, EdgeKind][][] = coords.map(() => []);
+  for (const [a, b, kind] of edges) {
+    if (!walkable(kind)) continue;
+    const m = haversine(coords[a][0], coords[a][1], coords[b][0], coords[b][1]);
+    adj[a].push([b, m, kind]);
+    adj[b].push([a, m, kind]);
+  }
+  // Points on footpaths alone, at ground level: not road junctions, stairs, bridges or tunnels.
+  const footOnly = (i: number) => adj[i].length > 0 && adj[i].every(([, , k]) => GAP_END_KINDS.has(k));
+  const levels = (i: number) => nodeLevels.get(i) ?? new Set(["ground0"]);
+  const onGround = (i: number) => [...levels(i)].some((l) => l.startsWith("ground"));
+  const sameLevel = (a: number, b: number) => [...levels(a)].some((l) => levels(b).has(l));
+  // Walking distance along the paths from i to everything within `limit`.
+  const walkFrom = (i: number, limit: number) => {
+    const dist = new Map<number, number>([[i, 0]]);
+    const heap = new Heap();
+    heap.push(i, 0);
+    while (heap.size) {
+      const [v, d] = heap.pop();
+      if (d > (dist.get(v) ?? Infinity)) continue;
+      for (const [w, m] of adj[v]) {
+        const nd = d + m;
+        if (nd <= limit && nd < (dist.get(w) ?? Infinity)) {
+          dist.set(w, nd);
+          heap.push(w, nd);
+        }
+      }
+    }
+    return dist;
+  };
+
+  const gaps: [number, number][] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < coords.length; i++) {
+    if (!footOnly(i) || !onGround(i)) continue;
+    const p = coords[i];
+    const near = index
+      .within(p, GAP_MAX_METERS, (j) => j !== i && footOnly(j) && onGround(j))
+      .map((j) => [j, haversine(p[0], p[1], coords[j][0], coords[j][1])] as const)
+      .filter(([, m]) => m >= STEP_ACROSS_METERS)
+      .sort((a, b) => a[1] - b[1]);
+    if (!near.length) continue;
+    const walk = walkFrom(i, gapDetour(GAP_MAX_METERS));
+    let added = 0;
+    for (const [j, m] of near) {
+      if (added >= GAPS_PER_NODE) break;
+      if ((walk.get(j) ?? Infinity) <= gapDetour(m) || !sameLevel(i, j) || !ground.openBetween(p, coords[j])) continue;
+      added++;
+      const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      gaps.push([i, j]);
+    }
+  }
+  return gaps;
+}
+
 /** Whether segments pq and rs properly cross. */
 function segmentsCross(p: LngLat, q: LngLat, r: LngLat, s: LngLat): boolean {
   const o = (a: LngLat, b: LngLat, c: LngLat) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
@@ -1435,6 +1520,21 @@ class PointIndex {
     const [lon, lat] = this.coords[i];
     const k = `${Math.floor(lon / this.cellDeg)},${Math.floor(lat / this.cellDeg)}`;
     (this.cells.get(k) ?? this.cells.set(k, []).get(k)!).push(i);
+  }
+  /** Every indexed point within maxMeters that passes `accept`. */
+  within(p: LngLat, maxMeters: number, accept: (i: number) => boolean = () => true): number[] {
+    const cx = Math.floor(p[0] / this.cellDeg);
+    const cy = Math.floor(p[1] / this.cellDeg);
+    const r = Math.ceil(maxMeters / 18) + 1;
+    const out: number[] = [];
+    for (let x = cx - r; x <= cx + r; x++) {
+      for (let y = cy - r; y <= cy + r; y++) {
+        for (const i of this.cells.get(`${x},${y}`) ?? []) {
+          if (accept(i) && haversine(p[0], p[1], this.coords[i][0], this.coords[i][1]) <= maxMeters) out.push(i);
+        }
+      }
+    }
+    return out;
   }
   /** Nearest indexed point within maxMeters that passes `accept`. */
   nearest(p: LngLat, maxMeters: number, accept: (i: number) => boolean = () => true): number {

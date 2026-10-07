@@ -18,6 +18,9 @@ export const EdgeKind = {
   Shared: 6,
   /** a road with a sidewalk on it (tagged, or a residential or through road with no tag saying otherwise): walk on the sidewalk, ride on the road */
   Sidewalk: 7,
+  /** walking straight across open ground (lawn, plaza, field) between two paths that don't meet
+   *  nearby; taken only when it saves a real part of the trip */
+  Gap: 8,
 } as const;
 export type EdgeKind = (typeof EdgeKind)[keyof typeof EdgeKind];
 

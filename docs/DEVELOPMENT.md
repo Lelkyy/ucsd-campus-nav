@@ -93,6 +93,17 @@ data/private/* (TSS) ──────┘                               ▼
     them along the paths is already under 25 m (or 4x the gap). Only points
     on footpaths alone (not road junctions or stairs), never between levels
     (`levelKey`: bridge, tunnel, indoors), never through a building wall.
+  - **Cutting across** (`addGaps`, `EdgeKind.Gap`): walking straight over open
+    ground between two footpaths 5-30 m apart, where the walk along the paths is
+    much longer (over 1.8x the gap + 15 m). UCSD's ground plan must show only
+    walkable or open ground in between: lawns, playing fields, dirt, gravel,
+    mulch, sand. Never a building, wall, planter, pool, rock, sports court, parking
+    lot or street. Same level only, at most two per path point, walking only (not
+    riding, not "No stairs"). The router counts a cut at 1.25x its walking time,
+    and `findRoute` keeps a route that uses one only if it beats the best route
+    on the paths by a real part of the trip (`GAP_MIN_SAVING`: 10% of the trip
+    and at least 20 s). Otherwise it stays on the paths. Directions say "... and
+    cut across to <path>". Cuts aren't drawn as paths on the map.
   - **Riding** can also use every other road in the area that bikes are allowed on.
   - **Cyclists keep right** (`bikeDirection`, `BikeDir` flags per edge, `edgeTravel`
     in the router):

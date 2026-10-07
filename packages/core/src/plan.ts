@@ -66,7 +66,8 @@ export function resolveTrip(graph: CampusGraph, from: Endpoint, to: Endpoint, pr
   const connectors: [LngLat, LngLat][] = [];
   const ends: { start?: Approach; end?: Approach } = {};
   const accept = profile.travel === "bike" ? graph.onBikeNetwork : graph.onWalkNetwork;
-  const usable = (e: number) => profile.speed[graph.kind(e)] > 0;
+  // A free point joins a real path, not a cut across the grass.
+  const usable = (e: number) => profile.speed[graph.kind(e)] > 0 && graph.kind(e) !== EdgeKind.Gap;
   const stepFree = profile.speed[EdgeKind.Steps] === 0;
   const riding = profile.travel === "bike";
   const targets = endpointNodes(graph, to, connectors, false, accept, usable, stepFree, riding, (a) => (ends.end = a));

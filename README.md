@@ -45,7 +45,8 @@ the way, using the paths, stairs and bike paths students actually use.
 - **Paths OSM doesn't have:** courtyards, building-side walks, plazas and
   trails traced from UC San Diego's surveyed ground plan. Walks keep off bike
   paths unless they save real time, and never follow a road with no sidewalk
-  unless it's the only way there.
+  unless it's the only way there. Where two paths come close, a walk can cut
+  across the lawn between them, but only when that saves a real part of the trip.
 - **Two campus maps:** the official campus map (district names and campus
   boundary) or UC San Diego's illustrated one, with routes and paths drawn on
   top.

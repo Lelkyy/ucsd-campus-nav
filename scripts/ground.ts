@@ -12,7 +12,7 @@ const TILES = "https://tiles.arcgis.com/tiles/mXNwDpiENQiMIzRv/arcgis/rest/servi
 /** The most detailed level the tiles carry (overzoomed above it). */
 const ZOOM = 16;
 
-/** Campus Map "Ground Level Basemap" classes (its `_symbol` values) we use. */
+/** Campus Map "Ground Level Basemap" classes (its `_symbol` values) with a role here. */
 export const GroundClass = {
   BikePath: 2,
   Building: 3,
@@ -22,7 +22,14 @@ export const GroundClass = {
   WalkingPath: 25,
   ServiceRoad: 29,
 } as const;
-const KEEP = new Set<number>(Object.values(GroundClass));
+/**
+ * Open ground you can walk across off the paths: lawns, playing fields, dirt, gravel, mulch,
+ * sand, curbs, piers (plazas are walking path already). Not: buildings, walls, planters, pools,
+ * rock, sheds, sports courts and tracks (often fenced), parking lots or streets.
+ */
+const OPEN_GROUND = new Set([1, 4, 8, 9, 10, 11, 18, 21, 28]);
+// Every class is kept: all of them mark the spot as surveyed.
+const KEEP = { has: (symbol: number) => Number.isFinite(symbol) };
 
 export interface GroundShape {
   symbol: number;
@@ -71,6 +78,7 @@ export const Cell = {
   Known: 16, // anything surveyed (incl. buildings and parking): the map covers this spot
   Covered: 32, // near a path already in the graph
   Alongside: 64, // within a path-width or two of one: a trace here all the way is that path, misaligned
+  Open: 128, // open ground to cut across (see OPEN_GROUND)
 } as const;
 
 const CLASS_BITS: Record<number, number> = {
@@ -115,8 +123,8 @@ export class GroundGrid {
     return [this.west + (x * this.cell) / this.mx, this.north - (y * this.cell) / this.my];
   }
   at(x: number, y: number): number {
-    x = Math.round(x);
-    y = Math.round(y);
+    x = Math.floor(x);
+    y = Math.floor(y);
     return x < 0 || y < 0 || x >= this.w || y >= this.h ? 0 : this.bits[y * this.w + x];
   }
   /** Whether any cell within `meters` of the point has one of `mask`'s bits. */
@@ -156,6 +164,25 @@ export class GroundGrid {
     }
   }
 
+  /**
+   * Whether the straight line a–b crosses only walkable or open ground: nothing surveyed in the
+   * way (building, wall, planter, water, street...), and no more than `unsurveyedMeters` of
+   * ground the plan doesn't cover (seams between shapes).
+   */
+  openBetween(a: LngLat, b: LngLat, unsurveyedMeters = 1.5): boolean {
+    const [ax, ay] = this.toCell(a);
+    const [bx, by] = this.toCell(b);
+    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay)));
+    let unsurveyed = 0;
+    for (let k = 0; k <= steps; k++) {
+      const v = this.at(ax + ((bx - ax) * k) / steps, ay + ((by - ay) * k) / steps);
+      if (v & (Cell.Open | Cell.Walk | Cell.Sidewalk | Cell.Bike)) continue;
+      if (v & Cell.Known) return false;
+      if ((unsurveyed += this.cell) > unsurveyedMeters) return false;
+    }
+    return true;
+  }
+
   /** Set `bit` on every cell within `meters` of the segment a–b. */
   stroke(a: LngLat, b: LngLat, meters: number, bit: number) {
     const [ax, ay] = this.toCell(a);
@@ -174,7 +201,7 @@ export class GroundGrid {
 
   static from(bbox: readonly [number, number, number, number], shapes: GroundShape[]): GroundGrid {
     const grid = new GroundGrid(bbox);
-    for (const s of shapes) grid.fill(s.rings, CLASS_BITS[s.symbol] | Cell.Known);
+    for (const s of shapes) grid.fill(s.rings, (CLASS_BITS[s.symbol] ?? (OPEN_GROUND.has(s.symbol) ? Cell.Open : 0)) | Cell.Known);
     return grid;
   }
 }

@@ -793,12 +793,13 @@ const UCSD_GROUND: LayerSpecification[] = [
   },
 ];
 
-/** Where you can walk: every walkable edge of the graph (not bike-only roads), by kind. */
+/** Where you can walk: every path edge of the graph (not bike-only roads or cuts across open ground), by kind. */
 function walkways(graph: CampusGraph): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   for (let e = 0; e < graph.edgeCount; e++) {
     const kind = graph.kind(e);
-    if (kind === EdgeKind.BikeOnly) continue;
+    // Ride-only roads and cuts across open ground aren't paths to draw.
+    if (kind === EdgeKind.BikeOnly || kind === EdgeKind.Gap) continue;
     features.push({
       type: "Feature",
       properties: { steps: kind === EdgeKind.Steps },

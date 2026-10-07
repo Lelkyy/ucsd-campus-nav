@@ -138,6 +138,16 @@ function moveSteps(graph: CampusGraph, leg: MoveLeg, offset: number, first: bool
       continue;
     }
 
+    // Leaving the paths to cut across open ground: say where to.
+    if (nextKind === EdgeKind.Gap && prevKind !== EdgeKind.Gap) {
+      let j = i;
+      while (j < c.length - 1 && kind(j) === EdgeKind.Gap) j++;
+      const toward = (j < c.length - 1 && name(j)) || "the next path";
+      const m = maneuverFor(normalize(bearingAround(c, cum, i, 1) - bearingAround(c, cum, i, -1)));
+      push(out, { maneuver: m, text: `${m === "straight" ? "Continue" : turnWords(m)} and cut across to ${toward}`, at: c[i], along });
+      continue;
+    }
+
     // Turns: only where paths meet (no choice = no instruction), or where the name changes.
     const node = leg.nodes[i];
     const junction = node >= 0 && graph.degree(node) >= 3;
