@@ -49,6 +49,8 @@ const RAW_GTFS_DIR = join(ROOT, "data/raw/gtfs");
 const RAW_UCSD = join(ROOT, "data/raw/ucsd-buildings.geojson");
 const RAW_UCSD_POINTS = join(ROOT, "data/raw/ucsd-building-points.geojson");
 const RAW_GROUND = join(ROOT, "data/raw/ucsd-ground.json");
+/** Every building outline in the area, named or not (roofs over paths). */
+const RAW_OSM_BUILDINGS = join(ROOT, "data/raw/osm-buildings.json");
 /** Building footprints from UC San Diego's public Campus Map (campusmap.ucsd.edu). */
 const UCSD_BUILDINGS = "https://admin-enterprise-gis.ucsd.edu/server/rest/services/AdministrationServices/Buildings_Public/MapServer";
 const UCSD_QUERY = "/query?where=1%3D1&outFields=OBJECTID,FacilityLongName,BuildingAliases&outSR=4326&resultRecordCount=2000&f=geojson";
@@ -201,6 +203,7 @@ const walkable = (kind: EdgeKind) => kind !== EdgeKind.BikeOnly;
 async function main() {
   const refresh = process.argv.includes("--refresh");
   if (refresh || !existsSync(RAW_OSM)) await fetchOsm();
+  if (refresh || !existsSync(RAW_OSM_BUILDINGS)) await fetchOsmBuildings();
   if (refresh || !existsSync(RAW_UCSD) || !existsSync(RAW_UCSD_POINTS)) await fetchUcsdBuildings();
   for (const feed of FEEDS) {
     const path = join(RAW_GTFS_DIR, `${feed.id}.zip`);
@@ -211,6 +214,18 @@ async function main() {
     writeFileSync(RAW_GROUND, JSON.stringify(await fetchGround(BBOX)));
   }
   const ground = groundGrid(JSON.parse(readFileSync(RAW_GROUND, "utf8")));
+  // Roofs: every building outline OSM and UCSD have, on top of the ground plan's own buildings.
+  const osmRoofs = (JSON.parse(readFileSync(RAW_OSM_BUILDINGS, "utf8")) as { elements: OsmElement[] }).elements;
+  for (const el of osmRoofs) {
+    const rings =
+      el.type === "way"
+        ? [el.geometry]
+        : el.type === "relation"
+          ? el.members.filter((m) => m.role !== "inner" && m.geometry).map((m) => m.geometry!)
+          : [];
+    for (const ring of rings) if (ring.length > 3) ground.fill([ring.map((p) => [p.lon, p.lat] as LngLat)], Cell.Roof);
+  }
+  for (const u of readUcsdBuildings()) for (const ring of u.lines) if (ring.length > 3) ground.fill([ring], Cell.Roof);
 
   const raw = JSON.parse(readFileSync(RAW_OSM, "utf8")) as { elements: OsmElement[]; osm3s?: { timestamp_osm_base?: string } };
   const blocked = new Set<number>(existsSync(BLOCKED_PATH) ? JSON.parse(readFileSync(BLOCKED_PATH, "utf8")) : []);
@@ -529,6 +544,47 @@ async function main() {
   const lotWalks = addCuts(ground, coords, edges, index, nodeLevels, LOT_RULE);
   for (const [a, b] of lotWalks) addEdge(a, b, EdgeKind.Lot, false);
 
+  // --- Paths that go under a building for part of the way are split where they go under and
+  // come out, so only the covered stretch is drawn dotted.
+  let roofSplits = 0;
+  for (let e = 0, n = edges.length; e < n; e++) {
+    const [a, b, kind, bikeOk, name, dir] = edges[e];
+    if (!walkable(kind) || kind === EdgeKind.Gap || kind === EdgeKind.Lot) continue;
+    const m = haversine(coords[a][0], coords[a][1], coords[b][0], coords[b][1]);
+    if (m < 2 * ROOF_MIN_RUN_METERS) continue;
+    const at = (t: number): LngLat => [coords[a][0] + (coords[b][0] - coords[a][0]) * t, coords[a][1] + (coords[b][1] - coords[a][1]) * t];
+    const roofed = (t: number) => {
+      const [x, y] = ground.toCell(at(t));
+      return (ground.at(x, y) & Cell.Roof) !== 0;
+    };
+    // Where it goes under or comes out, at least a few meters from the ends and each other.
+    const steps = Math.ceil(m);
+    const cuts: number[] = [];
+    let was = roofed(0);
+    for (let k = 1; k <= steps; k++) {
+      const is = roofed(k / steps);
+      if (is === was) continue;
+      was = is;
+      const t = (k - 0.5) / steps;
+      const last = cuts.length ? cuts[cuts.length - 1] : 0;
+      if ((t - last) * m >= ROOF_MIN_RUN_METERS && (1 - t) * m >= ROOF_MIN_RUN_METERS) cuts.push(t);
+    }
+    if (!cuts.length) continue;
+    const shared = [...(nodeLevels.get(a) ?? [])].filter((l) => nodeLevels.get(b)?.has(l));
+    let prev = a;
+    for (const t of cuts) {
+      const p = at(t);
+      const i = coords.push([round(p[0]), round(p[1])]) - 1;
+      index.add(i);
+      nodeLevels.set(i, new Set(shared.length ? shared : ["ground0"]));
+      edges.push([prev, i, kind, bikeOk, name, dir]);
+      edgeKeys.add(`${prev}-${i}`);
+      prev = i;
+    }
+    edges[e] = [prev, b, kind, bikeOk, name, dir];
+    roofSplits++;
+  }
+
   // --- Roads without a sidewalk aren't for walking. Keep one only where it's the sole link to a
   // campus building or stop: the shortest-path tree from central campus, roads all but ruled out.
   const required = new Set<number>();
@@ -792,6 +848,16 @@ async function main() {
 
   // --- Write.
   const [s, w, n, e] = BBOX;
+  // Under a roof or in a tunnel: tunnels, building passages and corridors by their tags, the rest
+  // where most of the stretch lies inside a building outline. (Not cuts across lots or lawns.)
+  const original = new Int32Array(finalCoords.length);
+  remap.forEach((f, i) => f !== -1 && (original[f] = i));
+  const underground = (i: number) => [...(nodeLevels.get(original[i]) ?? [])].some((l) => l.startsWith("tunnel") || l.startsWith("indoor"));
+  const covered = finalEdges.flatMap(([a, b, kind], e) => {
+    if (!walkable(kind) || kind === EdgeKind.Gap || kind === EdgeKind.Lot) return [];
+    if (underground(a) && underground(b)) return [e];
+    return ground.share(finalCoords[a], finalCoords[b], Cell.Roof) >= 0.5 ? [e] : [];
+  });
   const graph: GraphData = {
     version: 1,
     generatedAt: raw.osm3s?.timestamp_osm_base ?? new Date().toISOString(),
@@ -803,6 +869,7 @@ async function main() {
     mainComponent,
     bikeComponents: Array.from(bikeComps.id),
     mainBikeComponent,
+    covered,
     bikeDir: finalEdges.map((e) => e[5]),
     names,
     edgeNames: finalEdges.map((e) => e[4]),
@@ -825,7 +892,7 @@ async function main() {
   const count = (a: Building["access"]) => buildings.filter((b) => b.access === a).length;
   console.log(
     [
-      `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; step-across links: ${stepAcross.length}; cuts across open ground: ${finalEdges.filter((e) => e[2] === EdgeKind.Gap).length}; walks across parking lots: ${finalEdges.filter((e) => e[2] === EdgeKind.Lot).length} (aisles walkable: ${lotAisles}); walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
+      `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; step-across links: ${stepAcross.length}; cuts across open ground: ${finalEdges.filter((e) => e[2] === EdgeKind.Gap).length}; walks across parking lots: ${finalEdges.filter((e) => e[2] === EdgeKind.Lot).length} (aisles walkable: ${lotAisles}); under a roof or in a tunnel: ${covered.length} (${roofSplits} paths split where they go under); walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
       `riding: ${finalEdges.filter((e) => e[5] & (BikeDir.NoForward | BikeDir.NoBackward)).length} one-way segments (ridden only with the traffic), ` +
         `${finalEdges.filter((e) => e[5] & (BikeDir.LaneForward | BikeDir.LaneBackward)).length} with a bike lane (${finalEdges.filter((e) => (e[5] & BikeDir.LaneForward) !== 0 !== ((e[5] & BikeDir.LaneBackward) !== 0)).length} one side only)`,
       `walking network: ${new Set(Array.from(comps.id).filter((_, i) => walkNode[i])).size} pieces (main: ${mainSize} nodes); riding network main: ${bikeComps.size[mainBikeComponent]} nodes`,
@@ -935,7 +1002,9 @@ function readPrivateSections(): { data: SectionsData; rooms: Record<string, stri
 async function fetchOsm(): Promise<void> {
   const [s, w, n, e] = BBOX;
   const bbox = `${s},${w},${n},${e}`;
-  const query = `[out:json][timeout:180];
+  await fetchOverpass(
+    RAW_OSM,
+    `[out:json][timeout:180];
 (
   way["highway"](${bbox});
   way["building"]["name"](${bbox});
@@ -946,7 +1015,27 @@ async function fetchOsm(): Promise<void> {
   way["amenity"="university"](${bbox});
   relation["amenity"="university"](${bbox});
 );
-out body geom;`;
+out body geom;`,
+  );
+}
+
+/** Every building and building part in the area, for what's under a roof. */
+async function fetchOsmBuildings(): Promise<void> {
+  const [s, w, n, e] = BBOX;
+  const bbox = `${s},${w},${n},${e}`;
+  await fetchOverpass(
+    RAW_OSM_BUILDINGS,
+    `[out:json][timeout:120];
+(
+  way["building"](${bbox});
+  relation["building"](${bbox});
+  way["building:part"](${bbox});
+);
+out body geom;`,
+  );
+}
+
+async function fetchOverpass(path: string, query: string): Promise<void> {
   // Public Overpass servers are often busy; cycle through them a few times.
   for (let round = 0; round < 3; round++) {
     if (round > 0) await new Promise((r) => setTimeout(r, 30_000 * round));
@@ -962,8 +1051,8 @@ out body geom;`;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       JSON.parse(text); // fail fast on HTML error pages
-      mkdirSync(dirname(RAW_OSM), { recursive: true });
-      writeFileSync(RAW_OSM, text);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
       return;
     } catch (err) {
       console.warn(`  failed: ${(err as Error).message}`);
@@ -1455,6 +1544,8 @@ class SegmentIndex {
   }
 }
 
+/** A path is split where it goes under a building only for stretches at least this long. */
+const ROOF_MIN_RUN_METERS = 3;
 /** Points this close to a parking lot can start a walk across it (sidewalks round it, past the planting strip). */
 const LOT_REACH_METERS = 6;
 /** Aisles and paths in and round a lot get a point at least this often. */
@@ -1468,6 +1559,11 @@ interface CutRule {
   detour: (m: number) => number;
   /** Each point gets at most this many (its shortest). */
   perNode: number;
+  /**
+   * Instead of the shortest: in each of this many directions round a point, the longest clear
+   * line, so a walk across open ground runs straight (diagonally) instead of zigzagging.
+   */
+  sectors?: number;
   /** Kinds of edge a point may be on (all its edges). */
   endKinds: ReadonlySet<EdgeKind>;
   /** Extra condition on a point. */
@@ -1489,14 +1585,17 @@ const GAP_RULE: CutRule = {
 };
 
 /**
- * Walks across a parking lot, up to 60 m, between points in or at the edge of it (aisles, and the
- * paths and sidewalks round it), mostly over the lot itself.
+ * Walks across a parking lot between points in or at the edge of it (aisles, and the paths and
+ * sidewalks round it), mostly over the lot itself: from each point, the longest clear straight
+ * line (up to 150 m) in each of 16 directions, so you cross a lot diagonally, going round only
+ * what's in the way (planter islands, buildings).
  */
 const LOT_RULE: CutRule = {
   minMeters: 3,
-  maxMeters: 60,
-  detour: (m) => 1.3 * m + 10,
-  perNode: 4,
+  maxMeters: 150,
+  detour: (m) => 1.05 * m + 3,
+  perNode: 16,
+  sectors: 16,
   endKinds: new Set([...FOOTPATH_KINDS, EdgeKind.Sidewalk, EdgeKind.Gap, EdgeKind.Lot]),
   end: (p, ground) => ground.near(p, LOT_REACH_METERS, Cell.Parking),
   line: (a, b, ground) => ground.openBetween(a, b, OFF_PATH) && ground.share(a, b, Cell.Parking) >= 0.5,
@@ -1561,15 +1660,39 @@ function addCuts(
       .sort((a, b) => a[1] - b[1]);
     if (!near.length) continue;
     const walk = walkFrom(i, rule.detour(rule.maxMeters));
+    const usable = (j: number, m: number) =>
+      (walk.get(j) ?? Infinity) > rule.detour(m) && sameLevel(i, j) && rule.line(p, coords[j], ground);
+    const add = (j: number) => {
+      const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      cuts.push([i, j]);
+    };
+    if (rule.sectors) {
+      // The longest clear line in each direction.
+      const kx = Math.cos((p[1] * Math.PI) / 180);
+      const sector = (j: number) => {
+        const a = Math.atan2(coords[j][1] - p[1], (coords[j][0] - p[0]) * kx);
+        return Math.floor(((a + Math.PI) / (2 * Math.PI)) * rule.sectors!) % rule.sectors!;
+      };
+      const bySector = new Map<number, (readonly [number, number])[]>();
+      for (const c of near) (bySector.get(sector(c[0])) ?? bySector.set(sector(c[0]), []).get(sector(c[0]))!).push(c);
+      for (const list of bySector.values()) {
+        for (let k = list.length - 1; k >= 0; k--) {
+          if (usable(list[k][0], list[k][1])) {
+            add(list[k][0]);
+            break;
+          }
+        }
+      }
+      continue;
+    }
     let added = 0;
     for (const [j, m] of near) {
       if (added >= rule.perNode) break;
-      if ((walk.get(j) ?? Infinity) <= rule.detour(m) || !sameLevel(i, j) || !rule.line(p, coords[j], ground)) continue;
+      if (!usable(j, m)) continue;
       added++;
-      const key = i < j ? `${i}-${j}` : `${j}-${i}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      cuts.push([i, j]);
+      add(j);
     }
   }
   return cuts;

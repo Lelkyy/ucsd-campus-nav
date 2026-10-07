@@ -1,4 +1,4 @@
-import { type CampusGraph, type LngLat, type TransitStop } from "@campus/core";
+import { EdgeKind, type CampusGraph, type LngLat, type TransitStop } from "@campus/core";
 import {
   GeolocateControl,
   LngLatBounds,
@@ -185,31 +185,6 @@ export function MapView(props: MapViewProps) {
       // UCSD's own ground-level campus drawing (lawns, walkways, buildings...), in the app's palette.
       map.addSource("ucsd", { type: "vector", tiles: [UCSD_VECTOR_TILES], minzoom: 0, maxzoom: 16 });
       for (const layer of UCSD_GROUND) map.addLayer(layer);
-      // The campus map leaves out most footpaths: OpenStreetMap's, on top of it, white with a soft warm edge.
-      for (const [id, color, width] of [
-        ["campus-paths-casing", "#bdb5a1", [14, 1.2, 15, 2.2, 17, 4, 20, 11]],
-        ["campus-paths", "#ffffff", [14, 0.5, 15, 1, 17, 2.2, 20, 7]],
-      ] as const) {
-        map.addLayer({
-          id,
-          type: "line",
-          source: "openmaptiles",
-          "source-layer": "transportation",
-          minzoom: 14,
-          filter: [
-            "all",
-            ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
-            ["!=", ["get", "brunnel"], "tunnel"],
-            ["match", ["get", "class"], ["path", "pedestrian"], true, false],
-          ],
-          layout: { "line-join": "round", "line-cap": "round" },
-          paint: {
-            "line-color": color,
-            "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], ...width],
-            "line-opacity": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 15, 1],
-          },
-        });
-      }
       map.addSource("illustrated", {
         type: "raster",
         tiles: [ILLUSTRATED_TILES],
@@ -235,6 +210,10 @@ export function MapView(props: MapViewProps) {
           "line-blur": ["interpolate", ["exponential", 2], ["zoom"], 13, 3, 20, 384],
         },
       });
+      // Every path you can walk (the app's walking network), over both maps and under the routes;
+      // dotted where it runs under a building or through a tunnel.
+      map.addSource("walkways", { type: "geojson", data: walkways(props.graph) });
+      for (const layer of WALKWAY_LAYERS) map.addLayer(layer);
       for (const layer of UCSD_LAYERS) map.addLayer({ ...layer, layout: { ...layer.layout, visibility: "none" } } as LayerSpecification);
 
       for (const id of ["route", "connectors", "stops", "doors", "day", "places"]) {
@@ -429,11 +408,14 @@ export function MapView(props: MapViewProps) {
     // Campus: the topographic campus map over everything of OpenStreetMap's. Illustrated: the drawing,
     // on OpenStreetMap drawn in its colors.
     map.setLayoutProperty("topo", "visibility", vis(!illustrated));
-    map.setLayoutProperty("campus-paths-casing", "visibility", vis(!illustrated));
-    map.setLayoutProperty("campus-paths", "visibility", vis(!illustrated));
     for (const layer of UCSD_GROUND) map.setLayoutProperty(layer.id, "visibility", vis(!illustrated));
     map.setLayoutProperty("illustrated", "visibility", vis(illustrated));
     map.setLayoutProperty("illustrated-edge", "visibility", vis(illustrated));
+    // Walkways: white with a warm edge on the campus map, a little softer over the drawing.
+    const walk = illustrated ? WALKWAY_STYLE.illustrated : WALKWAY_STYLE.campus;
+    for (const id of WALKWAY_LAYERS.map((l) => l.id)) map.setPaintProperty(id, "line-opacity", walk.opacity);
+    map.setPaintProperty("walkways-casing", "line-color", walk.casing);
+    map.setPaintProperty("walkways-covered", "line-color", walk.casing);
     for (const { id, type } of osmLayers.current) {
       if (type !== "background") map.setLayoutProperty(id, "visibility", vis(illustrated && showsUnderDrawing(id, type)));
       // What shows while tiles load: the drawing's green, or the campus map's pale ground.
@@ -810,6 +792,82 @@ const UCSD_GROUND: LayerSpecification[] = [
     "source-layer": "Construction Buildings",
     layout: { visibility: "none" },
     paint: { "fill-color": "#e6dfc6", "fill-outline-color": "#9a927e" },
+  },
+];
+
+/**
+ * The paths to draw: every walkable edge but ride-only roads and the straight walks across lawns
+ * and parking lots (those aren't paths). `covered`: under a building or in a tunnel.
+ */
+function walkways(graph: CampusGraph): GeoJSON.FeatureCollection {
+  const covered = new Set(graph.data.covered ?? []);
+  const features: GeoJSON.Feature[] = [];
+  for (let e = 0; e < graph.edgeCount; e++) {
+    const kind = graph.kind(e);
+    if (kind === EdgeKind.BikeOnly || kind === EdgeKind.Gap || kind === EdgeKind.Lot) continue;
+    features.push({
+      type: "Feature",
+      properties: { steps: kind === EdgeKind.Steps, covered: covered.has(e) },
+      geometry: { type: "LineString", coordinates: [graph.coord(graph.edgeFrom[e]), graph.coord(graph.edgeTo[e])] },
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
+const WALKWAY_STYLE = {
+  campus: { casing: "#a99f88", opacity: 0.95 },
+  illustrated: { casing: "#5f6a4c", opacity: 0.8 },
+};
+const walkwayWidth = (scale: number): ExpressionSpecification => [
+  "interpolate",
+  ["exponential", 1.4],
+  ["zoom"],
+  14,
+  0.6 * scale,
+  16,
+  1.6 * scale,
+  18,
+  3.5 * scale,
+  20,
+  8 * scale,
+];
+const open: ExpressionSpecification = ["!", ["get", "covered"]];
+const WALKWAY_LAYERS: LayerSpecification[] = [
+  {
+    id: "walkways-casing",
+    type: "line",
+    source: "walkways",
+    minzoom: 14,
+    filter: open,
+    layout: { "line-join": "round", "line-cap": "round" },
+    paint: { "line-color": WALKWAY_STYLE.campus.casing, "line-width": walkwayWidth(1.9) },
+  },
+  {
+    id: "walkways",
+    type: "line",
+    source: "walkways",
+    minzoom: 14,
+    filter: ["all", open, ["!", ["get", "steps"]]],
+    layout: { "line-join": "round", "line-cap": "round" },
+    paint: { "line-color": "#ffffff", "line-width": walkwayWidth(1) },
+  },
+  // Stairs: dashed, so they read as steps.
+  {
+    id: "walkways-steps",
+    type: "line",
+    source: "walkways",
+    minzoom: 14,
+    filter: ["all", open, ["get", "steps"]],
+    paint: { "line-color": "#ffffff", "line-width": walkwayWidth(1), "line-dasharray": [0.6, 0.5] },
+  },
+  // Under a building or in a tunnel: dotted, in the edge color.
+  {
+    id: "walkways-covered",
+    type: "line",
+    source: "walkways",
+    minzoom: 14,
+    filter: ["get", "covered"],
+    layout: { "line-cap": "round" },
+    paint: { "line-color": WALKWAY_STYLE.campus.casing, "line-width": walkwayWidth(1.2), "line-dasharray": [0.01, 2] },
   },
 ];
 

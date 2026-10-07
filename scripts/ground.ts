@@ -80,6 +80,7 @@ export const Cell = {
   Alongside: 64, // within a path-width or two of one: a trace here all the way is that path, misaligned
   Open: 128, // open ground to cut across (see OPEN_GROUND)
   Parking: 256, // parking lot: walk anywhere on it
+  Roof: 512, // under a building (on the ground plan, or any building outline added): a path here is covered
 } as const;
 
 /** Ground you can walk on off the paths: open ground, and anywhere in a parking lot. */
@@ -91,7 +92,7 @@ const CLASS_BITS: Record<number, number> = {
   [GroundClass.BikePath]: Cell.Bike,
   [GroundClass.Street]: Cell.Street,
   [GroundClass.ServiceRoad]: Cell.Street,
-  [GroundClass.Building]: 0,
+  [GroundClass.Building]: Cell.Roof,
   [GroundClass.Parking]: Cell.Parking,
 };
 
@@ -176,6 +177,7 @@ export class GroundGrid {
   openBetween(a: LngLat, b: LngLat, allowed: number = Cell.Open, unsurveyedMeters = 1.5): boolean {
     let unsurveyed = 0;
     for (const v of this.sample(a, b)) {
+      if (v & Cell.Roof) return false;
       if (v & (allowed | Cell.Walk | Cell.Sidewalk | Cell.Bike)) continue;
       if (v & Cell.Known) return false;
       if ((unsurveyed += this.cell) > unsurveyedMeters) return false;

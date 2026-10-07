@@ -108,10 +108,10 @@ data/private/* (TSS) ──────┘                               ▼
     - **Aisles:** parking aisles, and road stretches mostly inside a lot, are
       walkable (`Sidewalk` kind).
     - **Walks across** (`LOT_RULE`, `EdgeKind.Lot`): aisles and paths in and within
-      6 m of a lot get a point every 15 m. Straight walks of up to 60 m join points
-      across the lot, mostly over the lot itself and never through a planter
-      island, building or street, where going round is longer (over 1.3x + 10 m).
-      At most four per point.
+      6 m of a lot get a point every 15 m. From each point, the longest clear
+      straight line in each of 16 directions (up to 150 m), so a walk crosses a
+      lot diagonally. It goes round only what's in the way (planter islands,
+      buildings, streets), and the line has to run mostly over the lot.
     - **Ordinary walking:** no "worth it" test, a 10% preference for real paths,
       and step-free. A bike is walked across. Directions say "... and cross the
       parking lot to <path>".
@@ -306,10 +306,24 @@ The **Map** button picks one of two campus maps (kept in `localStorage`,
   along its outline, traced once from its tiles' transparency into
   `apps/web/public/data/illustrated-edge.json`.
 
-In Campus mode the topographic map covers all of OpenStreetMap's drawing, and
-OpenStreetMap's footpaths (`path` and `pedestrian`, not tunnels) go on top of it
-as thin white lines with a warm edge (`campus-paths`, `campus-paths-casing`). The
-illustrated map gets no path lines of its own; only routes are drawn over it.
+In Campus mode the topographic map covers all of OpenStreetMap's drawing.
+
+On both, every path you can walk is drawn on top: the routing graph's walkable
+edges, but not ride-only roads or the straight walks across lawns and parking
+lots. They're white lines with a warm edge (`walkways`, `WALKWAY_LAYERS`); stairs
+are dashed, and the lines are a little softer over the drawing. They sit under
+the app's own layers, with no street names.
+- **Covered stretches** are dotted in the edge color: under a building (or in a
+  tunnel), where the path can't be seen from above. The build marks them
+  (`GraphData.covered`): tunnels and indoor corridors by their tags, and any
+  stretch at least half inside a building outline. Outlines come from all 3,000
+  OSM buildings and building parts, named or not (`data/raw/osm-buildings.json`,
+  refreshed with `--refresh`), UCSD's footprints and the ground plan's
+  buildings. Paths that go under a building part of the way are split where
+  they go under (stretches of 3 m or more).
+- **Limits:** a roof OSM and UCSD don't outline isn't caught, and in the satellite
+  imagery tall buildings lean, so their roofs look a few meters off their
+  footprints.
 
 **Places** come from the same campus map's "Campus Points Of Interest - Public"
 layer, grouped into nine categories in `scripts/fetch-campus-places.ts`
