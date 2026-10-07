@@ -103,7 +103,7 @@ data/private/* (TSS) ──────┘                               ▼
     and `findRoute` keeps a route that uses one only if it beats the best route (compared in seconds, `Route.seconds`)
     on the paths by a real part of the trip (`GAP_MIN_SAVING`: 10% of the trip
     and at least 20 s). Otherwise it stays on the paths. Directions say "... and
-    cut across to <path>". Cuts aren't drawn as paths on the map.
+    cut across to <path>".
   - **Parking lots** (UCSD's ground plan, `Cell.Parking`): walk anywhere.
     - **Aisles:** parking aisles, and road stretches mostly inside a lot, are
       walkable (`Sidewalk` kind).
@@ -114,7 +114,7 @@ data/private/* (TSS) ──────┘                               ▼
       At most four per point.
     - **Ordinary walking:** no "worth it" test, a 10% preference for real paths,
       and step-free. A bike is walked across. Directions say "... and cross the
-      parking lot to <path>"; not drawn as paths.
+      parking lot to <path>".
   - **Riding** can also use every other road in the area that bikes are allowed on.
   - **Cyclists keep right** (`bikeDirection`, `BikeDir` flags per edge, `edgeTravel`
     in the router):
@@ -306,13 +306,10 @@ The **Map** button picks one of two campus maps (kept in `localStorage`,
   along its outline, traced once from its tiles' transparency into
   `apps/web/public/data/illustrated-edge.json`.
 
-In Campus mode the topographic map covers all of OpenStreetMap's drawing.
-
-On both, everywhere you can walk is drawn on top: every walkable edge of the
-routing graph (footpaths, sidewalks, bike paths, step-across links, connector
-roads; not bike-only roads), as white lines with a warm edge (`walkways`,
-`WALKWAY_LAYERS`), stairs dashed, a little softer over the drawing, under the
-app's own layers. No street names.
+In Campus mode the topographic map covers all of OpenStreetMap's drawing, and
+OpenStreetMap's footpaths (`path` and `pedestrian`, not tunnels) go on top of it
+as thin white lines with a warm edge (`campus-paths`, `campus-paths-casing`). The
+illustrated map gets no path lines of its own; only routes are drawn over it.
 
 **Places** come from the same campus map's "Campus Points Of Interest - Public"
 layer, grouped into nine categories in `scripts/fetch-campus-places.ts`

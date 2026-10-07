@@ -49,8 +49,8 @@ the way, using the paths, stairs and bike paths students actually use.
   across the lawn between them, but only when that saves a real part of the trip.
   Parking lots can be walked anywhere.
 - **Two campus maps:** the official campus map (district names and campus
-  boundary) or UC San Diego's illustrated one, with routes and paths drawn on
-  top.
+  boundary, with its footpaths) or UC San Diego's illustrated one, with routes
+  drawn on top.
 - **Campus places:** show restrooms, food, water refill stations, study spots,
   bike racks, parking and more from UC San Diego's campus map, and get
   directions to any of them.
