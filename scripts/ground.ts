@@ -80,7 +80,7 @@ export const Cell = {
   Alongside: 64, // within a path-width or two of one: a trace here all the way is that path, misaligned
   Open: 128, // open ground to cut across (see OPEN_GROUND)
   Parking: 256, // parking lot: walk anywhere on it
-  Roof: 512, // under a building (on the ground plan, or any building outline added): a path here is covered
+  Roof: 512, // a building (on the ground plan, or any building outline added): no walking straight through
 } as const;
 
 /** Ground you can walk on off the paths: open ground, and anywhere in a parking lot. */

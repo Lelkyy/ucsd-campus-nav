@@ -1,4 +1,4 @@
-import { EdgeKind, type CampusGraph, type LngLat, type TransitStop } from "@campus/core";
+import { type CampusGraph, type LngLat, type TransitStop } from "@campus/core";
 import {
   GeolocateControl,
   LngLatBounds,
@@ -210,9 +210,6 @@ export function MapView(props: MapViewProps) {
           "line-blur": ["interpolate", ["exponential", 2], ["zoom"], 13, 3, 20, 384],
         },
       });
-      // Paths under a building or through a tunnel, dotted (the maps don't show them), under the routes.
-      map.addSource("walkways", { type: "geojson", data: coveredPaths(props.graph) });
-      map.addLayer(COVERED_LAYER);
       for (const layer of UCSD_LAYERS) map.addLayer({ ...layer, layout: { ...layer.layout, visibility: "none" } } as LayerSpecification);
 
       for (const id of ["route", "connectors", "stops", "doors", "day", "places"]) {
@@ -410,10 +407,6 @@ export function MapView(props: MapViewProps) {
     for (const layer of UCSD_GROUND) map.setLayoutProperty(layer.id, "visibility", vis(!illustrated));
     map.setLayoutProperty("illustrated", "visibility", vis(illustrated));
     map.setLayoutProperty("illustrated-edge", "visibility", vis(illustrated));
-    // Covered paths: warm gray dots on the campus map, olive and a little softer over the drawing.
-    const dots = illustrated ? COVERED_STYLE.illustrated : COVERED_STYLE.campus;
-    map.setPaintProperty("walkways-covered", "line-color", dots.color);
-    map.setPaintProperty("walkways-covered", "line-opacity", dots.opacity);
     for (const { id, type } of osmLayers.current) {
       if (type !== "background") map.setLayoutProperty(id, "visibility", vis(illustrated && showsUnderDrawing(id, type)));
       // What shows while tiles load: the drawing's green, or the campus map's pale ground.
@@ -792,37 +785,6 @@ const UCSD_GROUND: LayerSpecification[] = [
     paint: { "fill-color": "#e6dfc6", "fill-outline-color": "#9a927e" },
   },
 ];
-
-/** Paths under a building or through a tunnel (`GraphData.covered`), but not the straight walks across lawns and lots. */
-function coveredPaths(graph: CampusGraph): GeoJSON.FeatureCollection {
-  const features: GeoJSON.Feature[] = [];
-  for (const e of graph.data.covered ?? []) {
-    const kind = graph.kind(e);
-    if (kind === EdgeKind.BikeOnly || kind === EdgeKind.Gap || kind === EdgeKind.Lot) continue;
-    features.push({
-      type: "Feature",
-      properties: {},
-      geometry: { type: "LineString", coordinates: [graph.coord(graph.edgeFrom[e]), graph.coord(graph.edgeTo[e])] },
-    });
-  }
-  return { type: "FeatureCollection", features };
-}
-const COVERED_STYLE = {
-  campus: { color: "#a99f88", opacity: 0.95 },
-  illustrated: { color: "#5f6a4c", opacity: 0.8 },
-};
-const COVERED_LAYER: LayerSpecification = {
-  id: "walkways-covered",
-  type: "line",
-  source: "walkways",
-  minzoom: 14,
-  layout: { "line-cap": "round" },
-  paint: {
-    "line-color": COVERED_STYLE.campus.color,
-    "line-width": ["interpolate", ["exponential", 1.4], ["zoom"], 14, 0.7, 16, 1.9, 18, 4.2, 20, 9.6],
-    "line-dasharray": [0.01, 2],
-  },
-};
 
 /** The popup for a tapped place. */
 function placeCard(name: string, kind: string, building: string, onGo: () => void): HTMLElement {

@@ -98,7 +98,9 @@ data/private/* (TSS) ──────┘                               ▼
     much longer (over 1.8x the gap + 15 m). UCSD's ground plan must show only
     walkable or open ground in between: lawns, playing fields, dirt, gravel,
     mulch, sand. Never a building, wall, planter, pool, rock, sports court, parking
-    lot or street. Same level only, at most two per path point, walking only (not
+    lot or street. Buildings include every OSM outline, named or not
+    (`data/raw/osm-buildings.json`, refreshed with `--refresh`; not canopies or
+    carports), and UCSD's footprints, since the ground plan misses newer ones. Same level only, at most two per path point, walking only (not
     riding, not "No stairs"). The router counts a cut at 1.25x its walking time,
     and `findRoute` keeps a route that uses one only if it beats the best route (compared in seconds, `Route.seconds`)
     on the paths by a real part of the trip (`GAP_MIN_SAVING`: 10% of the trip
@@ -308,18 +310,8 @@ The **Map** button picks one of two campus maps (kept in `localStorage`,
 
 In Campus mode the topographic map covers all of OpenStreetMap's drawing.
 
-No path lines are drawn over either map, except:
-- **Covered stretches** are dotted (`coveredPaths`, warm gray; olive over the
-  drawing): paths under a building or in a tunnel, which neither map shows. The build marks them
-  (`GraphData.covered`): tunnels and indoor corridors by their tags, and any
-  stretch at least half inside a building outline. Outlines come from all 3,000
-  OSM buildings and building parts, named or not (`data/raw/osm-buildings.json`,
-  refreshed with `--refresh`), UCSD's footprints and the ground plan's
-  buildings. Paths that go under a building part of the way are split where
-  they go under (stretches of 3 m or more).
-- **Limits:** a roof OSM and UCSD don't outline isn't caught, and in the satellite
-  imagery tall buildings lean, so their roofs look a few meters off their
-  footprints.
+No path lines are drawn over either map: only the app's own layers (routes,
+stops, places) go on top.
 
 **Places** come from the same campus map's "Campus Points Of Interest - Public"
 layer, grouped into nine categories in `scripts/fetch-campus-places.ts`

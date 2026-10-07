@@ -49,7 +49,7 @@ const RAW_GTFS_DIR = join(ROOT, "data/raw/gtfs");
 const RAW_UCSD = join(ROOT, "data/raw/ucsd-buildings.geojson");
 const RAW_UCSD_POINTS = join(ROOT, "data/raw/ucsd-building-points.geojson");
 const RAW_GROUND = join(ROOT, "data/raw/ucsd-ground.json");
-/** Every building outline in the area, named or not (roofs over paths). */
+/** Every building outline in the area, named or not (kept out of walks across lawns and lots). */
 const RAW_OSM_BUILDINGS = join(ROOT, "data/raw/osm-buildings.json");
 /** Building footprints from UC San Diego's public Campus Map (campusmap.ucsd.edu). */
 const UCSD_BUILDINGS = "https://admin-enterprise-gis.ucsd.edu/server/rest/services/AdministrationServices/Buildings_Public/MapServer";
@@ -214,9 +214,11 @@ async function main() {
     writeFileSync(RAW_GROUND, JSON.stringify(await fetchGround(BBOX)));
   }
   const ground = groundGrid(JSON.parse(readFileSync(RAW_GROUND, "utf8")));
-  // Roofs: every building outline OSM and UCSD have, on top of the ground plan's own buildings.
+  // Buildings: every outline OSM and UCSD have, on top of the ground plan's own, so no walk across a
+  // lawn or lot goes through one. (Not open structures: canopies, carports, unbuilt sites.)
   const osmRoofs = (JSON.parse(readFileSync(RAW_OSM_BUILDINGS, "utf8")) as { elements: OsmElement[] }).elements;
   for (const el of osmRoofs) {
+    if (!el.tags?.building || OPEN_STRUCTURES.has(el.tags.building)) continue;
     const rings =
       el.type === "way"
         ? [el.geometry]
@@ -544,46 +546,6 @@ async function main() {
   const lotWalks = addCuts(ground, coords, edges, index, nodeLevels, LOT_RULE);
   for (const [a, b] of lotWalks) addEdge(a, b, EdgeKind.Lot, false);
 
-  // --- Paths that go under a building for part of the way are split where they go under and
-  // come out, so only the covered stretch is drawn dotted.
-  let roofSplits = 0;
-  for (let e = 0, n = edges.length; e < n; e++) {
-    const [a, b, kind, bikeOk, name, dir] = edges[e];
-    if (!walkable(kind) || kind === EdgeKind.Gap || kind === EdgeKind.Lot) continue;
-    const m = haversine(coords[a][0], coords[a][1], coords[b][0], coords[b][1]);
-    if (m < 2 * ROOF_MIN_RUN_METERS) continue;
-    const at = (t: number): LngLat => [coords[a][0] + (coords[b][0] - coords[a][0]) * t, coords[a][1] + (coords[b][1] - coords[a][1]) * t];
-    const roofed = (t: number) => {
-      const [x, y] = ground.toCell(at(t));
-      return (ground.at(x, y) & Cell.Roof) !== 0;
-    };
-    // Where it goes under or comes out, at least a few meters from the ends and each other.
-    const steps = Math.ceil(m);
-    const cuts: number[] = [];
-    let was = roofed(0);
-    for (let k = 1; k <= steps; k++) {
-      const is = roofed(k / steps);
-      if (is === was) continue;
-      was = is;
-      const t = (k - 0.5) / steps;
-      const last = cuts.length ? cuts[cuts.length - 1] : 0;
-      if ((t - last) * m >= ROOF_MIN_RUN_METERS && (1 - t) * m >= ROOF_MIN_RUN_METERS) cuts.push(t);
-    }
-    if (!cuts.length) continue;
-    const shared = [...(nodeLevels.get(a) ?? [])].filter((l) => nodeLevels.get(b)?.has(l));
-    let prev = a;
-    for (const t of cuts) {
-      const p = at(t);
-      const i = coords.push([round(p[0]), round(p[1])]) - 1;
-      index.add(i);
-      nodeLevels.set(i, new Set(shared.length ? shared : ["ground0"]));
-      edges.push([prev, i, kind, bikeOk, name, dir]);
-      edgeKeys.add(`${prev}-${i}`);
-      prev = i;
-    }
-    edges[e] = [prev, b, kind, bikeOk, name, dir];
-    roofSplits++;
-  }
 
   // --- Roads without a sidewalk aren't for walking. Keep one only where it's the sole link to a
   // campus building or stop: the shortest-path tree from central campus, roads all but ruled out.
@@ -848,16 +810,6 @@ async function main() {
 
   // --- Write.
   const [s, w, n, e] = BBOX;
-  // Under a roof or in a tunnel: tunnels, building passages and corridors by their tags, the rest
-  // where most of the stretch lies inside a building outline. (Not cuts across lots or lawns.)
-  const original = new Int32Array(finalCoords.length);
-  remap.forEach((f, i) => f !== -1 && (original[f] = i));
-  const underground = (i: number) => [...(nodeLevels.get(original[i]) ?? [])].some((l) => l.startsWith("tunnel") || l.startsWith("indoor"));
-  const covered = finalEdges.flatMap(([a, b, kind], e) => {
-    if (!walkable(kind) || kind === EdgeKind.Gap || kind === EdgeKind.Lot) return [];
-    if (underground(a) && underground(b)) return [e];
-    return ground.share(finalCoords[a], finalCoords[b], Cell.Roof) >= 0.5 ? [e] : [];
-  });
   const graph: GraphData = {
     version: 1,
     generatedAt: raw.osm3s?.timestamp_osm_base ?? new Date().toISOString(),
@@ -869,7 +821,6 @@ async function main() {
     mainComponent,
     bikeComponents: Array.from(bikeComps.id),
     mainBikeComponent,
-    covered,
     bikeDir: finalEdges.map((e) => e[5]),
     names,
     edgeNames: finalEdges.map((e) => e[4]),
@@ -892,7 +843,7 @@ async function main() {
   const count = (a: Building["access"]) => buildings.filter((b) => b.access === a).length;
   console.log(
     [
-      `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; step-across links: ${stepAcross.length}; cuts across open ground: ${finalEdges.filter((e) => e[2] === EdgeKind.Gap).length}; walks across parking lots: ${finalEdges.filter((e) => e[2] === EdgeKind.Lot).length} (aisles walkable: ${lotAisles}); under a roof or in a tunnel: ${covered.length} (${roofSplits} paths split where they go under); walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
+      `nodes ${finalCoords.length}, edges ${finalEdges.length} (roads with sidewalks: ${sidewalkEdges}; step-across links: ${stepAcross.length}; cuts across open ground: ${finalEdges.filter((e) => e[2] === EdgeKind.Gap).length}; walks across parking lots: ${finalEdges.filter((e) => e[2] === EdgeKind.Lot).length} (aisles walkable: ${lotAisles}); walking connector roads: ${roadEdges} of ${totalRoads}; bike-only: ${bikeOnly}; bike/shared paths: ${shared})`,
       `riding: ${finalEdges.filter((e) => e[5] & (BikeDir.NoForward | BikeDir.NoBackward)).length} one-way segments (ridden only with the traffic), ` +
         `${finalEdges.filter((e) => e[5] & (BikeDir.LaneForward | BikeDir.LaneBackward)).length} with a bike lane (${finalEdges.filter((e) => (e[5] & BikeDir.LaneForward) !== 0 !== ((e[5] & BikeDir.LaneBackward) !== 0)).length} one side only)`,
       `walking network: ${new Set(Array.from(comps.id).filter((_, i) => walkNode[i])).size} pieces (main: ${mainSize} nodes); riding network main: ${bikeComps.size[mainBikeComponent]} nodes`,
@@ -1544,8 +1495,8 @@ class SegmentIndex {
   }
 }
 
-/** A path is split where it goes under a building only for stretches at least this long. */
-const ROOF_MIN_RUN_METERS = 3;
+/** "Buildings" that are open or not there yet: you can walk under or through them. */
+const OPEN_STRUCTURES = new Set(["roof", "carport", "canopy", "construction", "ruins", "no"]);
 /** Points this close to a parking lot can start a walk across it (sidewalks round it, past the planting strip). */
 const LOT_REACH_METERS = 6;
 /** Aisles and paths in and round a lot get a point at least this often. */
