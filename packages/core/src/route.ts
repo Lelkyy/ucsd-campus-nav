@@ -227,6 +227,8 @@ export interface Route {
   meters: number;
   /** Door to door, including waiting for a shuttle. */
   minutes: number;
+  /** The same, in seconds (what comparisons between routes use). */
+  seconds: number;
   stairSegments: number;
   leaveAt: Date;
   arriveAt: Date;
@@ -264,8 +266,8 @@ export function findRoute(
   if (!across || opts.noGaps || !usesGap(graph, across)) return across;
   const onPaths = search(graph, start, targets, { ...opts, noGaps: true });
   if (!onPaths) return across;
-  const saved = (onPaths.minutes - across.minutes) * 60;
-  return saved >= Math.max(GAP_MIN_SAVING.seconds, GAP_MIN_SAVING.share * onPaths.minutes * 60) ? across : onPaths;
+  const saved = onPaths.seconds - across.seconds;
+  return saved >= Math.max(GAP_MIN_SAVING.seconds, GAP_MIN_SAVING.share * onPaths.seconds) ? across : onPaths;
 }
 
 /** Whether the route cuts across open ground anywhere. */
@@ -479,6 +481,7 @@ function buildRoute(
     coordinates: legs.flatMap((l) => l.coordinates),
     meters: moves.reduce((s, l) => s + l.meters, 0),
     minutes: (arriveAt.getTime() - leaveAt.getTime()) / 60_000,
+    seconds: (arriveAt.getTime() - leaveAt.getTime()) / 1000,
     stairSegments: moves.reduce((s, l) => s + l.stairSegments, 0),
     leaveAt,
     arriveAt,
@@ -527,7 +530,7 @@ export function findRouteArriveBy(
     const dt = leave.getTime() - r.leaveAt.getTime();
     return { ...r, leaveAt: leave, arriveAt: new Date(r.arriveAt.getTime() + dt) };
   };
-  const walking = walkOnly && shiftTo(walkOnly, new Date(arriveBy.getTime() - walkOnly.minutes * 60_000));
+  const walking = walkOnly && shiftTo(walkOnly, new Date(arriveBy.getTime() - walkOnly.seconds * 1000));
   if (!opts.transit) return walking;
 
   // Latest departure within the last 3 hours whose route still arrives in time.

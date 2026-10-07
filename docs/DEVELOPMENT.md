@@ -100,7 +100,7 @@ data/private/* (TSS) ──────┘                               ▼
     mulch, sand. Never a building, wall, planter, pool, rock, sports court, parking
     lot or street. Same level only, at most two per path point, walking only (not
     riding, not "No stairs"). The router counts a cut at 1.25x its walking time,
-    and `findRoute` keeps a route that uses one only if it beats the best route
+    and `findRoute` keeps a route that uses one only if it beats the best route (compared in seconds, `Route.seconds`)
     on the paths by a real part of the trip (`GAP_MIN_SAVING`: 10% of the trip
     and at least 20 s). Otherwise it stays on the paths. Directions say "... and
     cut across to <path>". Cuts aren't drawn as paths on the map.

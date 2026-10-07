@@ -194,6 +194,7 @@ export function attachEnds(graph: CampusGraph, route: Route, ends: { start?: App
     coordinates,
     meters,
     minutes: route.minutes + (startSec + endSec) / 60,
+    seconds: route.seconds + startSec + endSec,
     leaveAt: new Date(route.leaveAt.getTime() - startSec * 1000),
     arriveAt: new Date(route.arriveAt.getTime() + endSec * 1000),
   };
