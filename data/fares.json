@@ -1,0 +1,18 @@
+{
+  "_about": "Fares per transit feed. The MTS GTFS fare tables lag behind fare changes, so the current price lives here with its source. A one-way fare covers unlimited transfers on the same system within transferMinutes (PRONTO). upassFree: UC San Diego students ride free with the U-Pass included in student fees.",
+  "feeds": {
+    "triton": {
+      "name": "Triton Transit",
+      "oneWay": 0,
+      "note": "UC San Diego campus shuttles are free."
+    },
+    "mts": {
+      "name": "MTS",
+      "oneWay": 3.0,
+      "transferMinutes": 120,
+      "upassFree": true,
+      "effective": "2026-10-01",
+      "source": "MTS/NCTD fare change effective Oct 1, 2026 (SANDAG fare structure; Times of San Diego, Sept 30, 2026). U-Pass: transportation.ucsd.edu/commute/transit"
+    }
+  }
+}
