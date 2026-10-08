@@ -628,6 +628,7 @@ export function App() {
           places={campusPlaces}
           categories={placeCategories}
           onCategories={setPlaceCategories}
+          nearYou={!!here}
         />
       </div>
 

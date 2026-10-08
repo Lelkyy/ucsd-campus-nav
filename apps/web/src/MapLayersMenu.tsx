@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { SatelliteIcon } from "./Icons.tsx";
-import type { BaseMap, CampusPlaces } from "./MapView.tsx";
+import { NEAREST_PLACES, type BaseMap, type CampusPlaces } from "./MapView.tsx";
 
 const BASE_MAPS: { id: BaseMap; label: string; note: string }[] = [
   { id: "campus", label: "Campus", note: "The official campus map" },
@@ -14,12 +14,15 @@ export function MapLayersMenu({
   places,
   categories,
   onCategories,
+  nearYou,
 }: {
   baseMap: BaseMap;
   onBaseMap: (b: BaseMap) => void;
   places: CampusPlaces | null;
   categories: string[];
   onCategories: Dispatch<SetStateAction<string[]>>;
+  /** Whether we know where you are (nearest to you), or go by the middle of the map. */
+  nearYou: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -65,7 +68,7 @@ export function MapLayersMenu({
           {places && (
             <>
               <div className="layers-head">
-                <strong>Show on the map</strong>
+                <strong>Nearest {NEAREST_PLACES}</strong>
                 {shown > 0 && (
                   <button className="link" onClick={() => onCategories([])}>
                     Clear
@@ -89,7 +92,10 @@ export function MapLayersMenu({
                   );
                 })}
               </div>
-              <p className="muted small layers-source">Places from UC San Diego's campus map.</p>
+              <p className="muted small layers-source">
+                The {NEAREST_PLACES} of each closest to {nearYou ? "you" : "the middle of the map"}. Places from UC San Diego's campus
+                map.
+              </p>
             </>
           )}
         </div>

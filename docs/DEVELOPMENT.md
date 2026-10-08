@@ -343,10 +343,13 @@ No path lines are drawn over either map: only the app's own layers (routes,
 stops, places) go on top.
 
 **Places** come from the same campus map's "Campus Points Of Interest - Public"
-layer, grouped into nine categories in `scripts/fetch-campus-places.ts`
-(internal ones like waypoints, offices and conference rooms are left out) and
-toggled from the Map button (`campus-nav:place-categories`). Tapping one shows
-what and where it is, with Directions here. UCSD's points can be 10–60 m off.
+layer, grouped into ten categories in `scripts/fetch-campus-places.ts`
+(vending machines on their own; internal ones like waypoints, offices and
+conference rooms are left out) and toggled from the Map button's "Nearest 5"
+(`campus-nav:place-categories`). Only the 5 of each chosen kind nearest to you
+are shown (`NEAREST_PLACES`), or nearest to the middle of the map when your
+location isn't known, updating as you pan. Tapping one shows what and where it
+is, with Directions here. UCSD's points can be 10–60 m off.
 
 ## Search
 

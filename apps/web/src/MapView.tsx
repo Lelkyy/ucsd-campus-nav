@@ -1,4 +1,4 @@
-import { type CampusGraph, type LngLat, type TransitStop } from "@campus/core";
+import { haversine, type CampusGraph, type LngLat, type TransitStop } from "@campus/core";
 import {
   GeolocateControl,
   LngLatBounds,
@@ -28,6 +28,9 @@ const UCSD_VECTOR_TILES = "https://tiles.arcgis.com/tiles/mXNwDpiENQiMIzRv/arcgi
 
 /** The map underneath: the official campus map, or UCSD's illustrated one on top of it. */
 export type BaseMap = "campus" | "illustrated";
+
+/** How many of each kind of place to show: the nearest. */
+export const NEAREST_PLACES = 5;
 
 /** Places from UCSD's campus map (apps/web/public/data/campus-places.json). */
 export interface CampusPlaces {
@@ -122,6 +125,8 @@ export function MapView(props: MapViewProps) {
   const markers = useRef<{ from: Marker; to: Marker; report: Marker; user: Marker; room: Marker } | null>(null);
   const roomLabel = useRef<HTMLSpanElement | null>(null);
   const [ready, setReady] = useState(false);
+  /** The middle of the map, for the nearest places when we don't know where you are. */
+  const [mapCentre, setMapCentre] = useState<LngLat | null>(null);
   const lastTrip = useRef<string | null>(null);
   const popup = useRef<Popup | null>(null);
   const osmLayers = useRef<{ id: string; type: string }[]>([]);
@@ -364,6 +369,12 @@ export function MapView(props: MapViewProps) {
         source: "connectors",
         paint: { "line-color": PALETTE.oliveDeep, "line-width": 3, "line-dasharray": [1, 1.5] },
       });
+      const centre = () => {
+        const c = map.getCenter();
+        setMapCentre([c.lng, c.lat]);
+      };
+      centre();
+      map.on("moveend", centre);
       setReady(true);
     });
 
@@ -415,18 +426,31 @@ export function MapView(props: MapViewProps) {
     for (const layer of UCSD_LAYERS) map.setLayoutProperty(layer.id, "visibility", vis(props.baseMap === "campus"));
   }, [ready, props.baseMap]);
 
+  // Places: the few nearest of each kind shown, to you (or to the middle of the map), not the whole campus.
+  const anchor = props.userPos ?? mapCentre;
   useEffect(() => {
     if (!ready || !props.places) return;
     const { categories, points } = props.places;
+    const shown = anchor
+      ? props.placeCategories.flatMap((id) => {
+          const cat = categories.findIndex((c) => c.id === id);
+          return points
+            .filter((p) => p[2] === cat)
+            .map((p) => ({ p, m: haversine(anchor[0], anchor[1], p[0], p[1]) }))
+            .sort((a, b) => a.m - b.m)
+            .slice(0, NEAREST_PLACES)
+            .map(({ p }) => p);
+        })
+      : [];
     source(mapRef.current!, "places").setData({
       type: "FeatureCollection",
-      features: points.map(([lng, lat, cat, name, kind, building]) => ({
+      features: shown.map(([lng, lat, cat, name, kind, building]) => ({
         type: "Feature",
         properties: { cat: categories[cat].id, color: categories[cat].color, name, kind, building },
         geometry: { type: "Point", coordinates: [lng, lat] },
       })),
     });
-  }, [ready, props.places]);
+  }, [ready, props.places, props.placeCategories, anchor?.[0], anchor?.[1]]);
 
   useEffect(() => {
     if (!ready) return;

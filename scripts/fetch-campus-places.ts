@@ -18,8 +18,9 @@ const CATEGORIES: { id: string; label: string; color: string; subclasses: string
     id: "food",
     label: "Food & drink",
     color: "#D9732B",
-    subclasses: ["Dining Halls", "Cafes and Restaurants", "Coffee", "Markets", "Vending Machines"],
+    subclasses: ["Dining Halls", "Cafes and Restaurants", "Coffee", "Markets"],
   },
+  { id: "vending", label: "Vending machines", color: "#8A5A9E", subclasses: ["Vending Machines"] },
   {
     id: "restrooms",
     label: "Restrooms",
