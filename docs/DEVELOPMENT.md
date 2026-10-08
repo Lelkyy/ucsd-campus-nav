@@ -190,8 +190,13 @@ Ask Leonid for the files. Don't commit them or the generated
   twice in a row re-routes from where you are; within 15 m of the end is arrival.
   **Simulate** walks the route on screen (6x speed); it shows in dev and whenever
   there's no GPS fix.
-- `indoor.ts`: routes skip emergency exits, step-free routes prefer doors tagged
-  `wheelchair=yes`, and a room mapped indoors pulls the route to the nearest door.
+- `indoor.ts`: routes skip emergency exits, and step-free routes prefer doors
+  tagged `wheelchair=yes`. Every room is pinned to the middle of its building
+  (`buildingCentre`), so a room doesn't pick the door. The middle is the point
+  of the outline farthest from every wall, nudged toward the centre of mass on
+  near ties. It's always inside the building, even an L or a U, where the
+  centre of mass can sit in the courtyard (54 of 574 buildings had their listed
+  centre outside the outline).
   Floors come from mapped rooms (`indoor=room` + `level`) when available,
   otherwise from the room number (first digit; `B…` is basement), labelled as a guess.
 - **Room pointers:** no floor drawings; the app says roughly where a room is:
@@ -300,6 +305,12 @@ own locate dot is off). The cone follows the compass when the phone has one
 tap asks), else the way you're moving (GPS heading), else the way the route
 sets off. When the trip starts from "My location", the dot stands in for the
 start pin, and the start follows you as you move, without re-framing the map.
+
+Inside a building, or within 10 m of its walls (`buildingAt`; GPS wanders in
+and around buildings), you're pinned in it. Your dot sits at the building's
+middle (`buildingCentre`), and a trip from "My location" leaves by the
+building's doors, like a trip from the building itself (`Endpoint` point with
+`building`). Live navigation still follows the raw GPS.
 
 ## Map styles and places
 

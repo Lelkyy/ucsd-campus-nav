@@ -6,10 +6,10 @@ import { entranceTargets } from "./indoor.ts";
 import { EdgeKind, type Building, type LngLat, type Place } from "./types.ts";
 
 export type Endpoint =
-  /** roomAt: where the room is, when it's mapped indoors (routes go to the nearest door). */
-  | { kind: "building"; building: Building; room?: string; roomAt?: LngLat }
+  | { kind: "building"; building: Building; room?: string }
   | { kind: "place"; place: Place }
-  | { kind: "point"; lngLat: LngLat; label: string };
+  /** building: the point is in (or right beside) this building: routes use its doors. */
+  | { kind: "point"; lngLat: LngLat; label: string; building?: Building };
 
 export function endpointPosition(e: Endpoint): LngLat {
   if (e.kind === "building") return e.building.center;
@@ -114,15 +114,17 @@ function endpointNodes(
   riding: boolean,
   onApproach: (a: Approach) => void,
 ): number[] {
-  if (e.kind === "building") {
-    const doors = entranceTargets(e.building, (n) => graph.coord(n), { stepFree, roomAt: isStart ? undefined : e.roomAt });
+  const inBuilding = e.kind === "building" ? e.building : e.kind === "point" ? e.building : undefined;
+  if (inBuilding) {
+    const doors = entranceTargets(inBuilding, { stepFree });
     // A bike can also pull up on a road beside the building that has no sidewalk to walk.
-    return riding ? [...doors, ...(e.building.rideTargets ?? [])] : doors;
+    return riding ? [...doors, ...(inBuilding.rideTargets ?? [])] : doors;
   }
   if (e.kind === "place") {
     const nodes = e.place.points.map((p) => graph.nearestNode(p, { maxMeters: 300, accept })).filter((n) => n !== -1);
     return [...new Set(nodes)];
   }
+  if (e.kind !== "point") return [];
   // A free point joins the nearest path or road at its closest point (a short, straight dotted
   // line), and the route runs along that edge from there, whichever way is better.
   const hit = graph.nearestEdgePoint(e.lngLat, { maxMeters: 300, accept, usable });

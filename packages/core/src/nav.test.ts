@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CampusGraph } from "./graph.ts";
-import { entranceTargets, findRoom, floorFromRoom, floorPhrase, floorToLevel, insideHints, levelLabel, levelsOf, roomFloor } from "./indoor.ts";
+import { buildingAt, buildingCentre, entranceTargets, findRoom, floorFromRoom, floorPhrase, floorToLevel, insideHints, levelLabel, levelsOf, roomFloor } from "./indoor.ts";
 import { buildSteps } from "./instructions.ts";
 import { RouteTracker, currentStepIndex } from "./nav.ts";
 import { PROFILES, findRoute } from "./route.ts";
@@ -85,14 +85,13 @@ describe("doors", () => {
       { lngLat: [0, -0.0001], node: 3, kind: "emergency" },
     ],
   };
-  const coord = (n: number) => building.entrances!.find((d) => d.node === n)!.lngLat;
 
   it("never routes to an emergency exit", () => {
-    expect(entranceTargets(building, coord)).toEqual([1, 2]);
+    expect(entranceTargets(building)).toEqual([1, 2]);
   });
 
   it("prefers the wheelchair-accessible door for step-free routes", () => {
-    expect(entranceTargets(building, coord, { stepFree: true })).toEqual([2]);
+    expect(entranceTargets(building, { stepFree: true })).toEqual([2]);
   });
 
   it("describes the door the route ends at", () => {
@@ -100,6 +99,49 @@ describe("doors", () => {
     const hints = insideHints(building, "2001", undefined, route as never);
     expect(hints.enterBy).toBe("the main entrance on the north side");
     expect(hints.floor?.label).toBe("Floor 2");
+  });
+});
+
+describe("pinning to a building", () => {
+  // An L-shaped building ~110 m on a side (its listed centre is a vertex average).
+  const L: Building = {
+    id: "l",
+    name: "L Hall",
+    aliases: [],
+    center: [0.0004, 0.0004],
+    targets: [7],
+    entranceCount: 0,
+    access: "walk",
+    outline: [[[0, 0], [0.001, 0], [0.001, 0.0003], [0.0003, 0.0003], [0.0003, 0.001], [0, 0.001], [0, 0]]],
+  };
+
+  it("puts rooms in the middle of their building, always inside it", () => {
+    const c = buildingCentre(L);
+    // In the L itself (one arm or the corner), not the open square it wraps round.
+    expect(c[0] < 0.0003 || c[1] < 0.0003).toBe(true);
+    expect(c[0]).toBeGreaterThan(0.00005);
+    expect(c[1]).toBeGreaterThan(0.00005);
+    expect(insideHints(L, "2001", undefined, null).roomAt).toEqual(c);
+    // A U: its centre of mass is in the courtyard; the pin isn't.
+    const U: Building = {
+      ...L,
+      outline: [[[0, 0], [0.001, 0], [0.001, 0.001], [0.0008, 0.001], [0.0008, 0.0002], [0.0002, 0.0002], [0.0002, 0.001], [0, 0.001], [0, 0]]],
+    };
+    const u = buildingCentre(U);
+    const inCourtyard = u[0] > 0.0002 && u[0] < 0.0008 && u[1] > 0.0002;
+    expect(inCourtyard).toBe(false);
+    // A plain rectangle: its centre.
+    const box: Building = { ...L, outline: [[[0, 0], [0.002, 0], [0.002, 0.001], [0, 0.001], [0, 0]]] };
+    expect(buildingCentre(box)[0]).toBeCloseTo(0.001, 4);
+    expect(buildingCentre(box)[1]).toBeCloseTo(0.0005, 4);
+    expect(insideHints(L, undefined, undefined, null).roomAt).toBeUndefined();
+  });
+
+  it("finds the building you're in or right beside, and nothing further off", () => {
+    expect(buildingAt([L], [0.0001, 0.0001], 10)?.id).toBe("l"); // inside
+    expect(buildingAt([L], [0.0012 / 1, 0.0001], 30)?.id).toBe("l"); // ~22 m off the east wall
+    expect(buildingAt([L], [0.0012, 0.0001], 10)).toBeNull();
+    expect(buildingAt([L], [0.0008, 0.0008], 10)).toBeNull(); // in the crook of the L, ~55 m from the walls
   });
 });
 

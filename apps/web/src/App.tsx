@@ -6,7 +6,8 @@ import {
   PROFILES,
   rideRuns,
   buildSteps,
-  findRoom,
+  buildingAt,
+  buildingCentre,
   type IndoorData,
   formatFare,
   routeLabel,
@@ -59,6 +60,9 @@ import { useSchedule } from "./useSchedule.ts";
 
 /** Suggest transit while walking only when it saves at least this much time. */
 const SUGGEST_MIN_FASTER = 3;
+/** Inside a building, or this close to its walls (GPS wanders by buildings), you're in it. */
+const PIN_TO_BUILDING_M = 10;
+type PointEndpoint = Extract<Endpoint, { kind: "point" }>;
 const BIKE_COLOR = PALETTE.sageDeep;
 const MODE_ICONS: Record<ModeId, () => JSX.Element> = { walk: WalkIcon, accessible: StepFreeIcon, bike: BikeIcon, bus: BusIcon };
 
@@ -190,20 +194,9 @@ export function App() {
     setArriveBy(null);
   };
   const setTo = (e: Endpoint | null) => {
-    setToRaw(withRoom(e));
+    setToRaw(e);
     setArriveBy(null);
   };
-  /** Point a building destination at its room, when the room is mapped indoors. */
-  const withRoom = (e: Endpoint | null): Endpoint | null => {
-    if (e?.kind !== "building" || !e.room || !data) return e;
-    const room = findRoom(indoor[e.building.id], e.room);
-    return room ? { ...e, roomAt: room.center } : e;
-  };
-
-  // A room pinned (or newly mapped) while it's the destination: route to the door nearest it.
-  useEffect(() => {
-    setToRaw((t) => (t?.kind === "building" && t.room && !t.roomAt ? withRoom(t) : t));
-  }, [indoor]);
 
   const reload = useCallback(async (bust: boolean) => {
     try {
@@ -308,10 +301,23 @@ export function App() {
     return saved >= SUGGEST_MIN_FASTER ? { route: bestTransit.route, savedMin: Math.round(saved) } : null;
   }, [mode, bestTransit, route, arriveBy]);
 
+  /** "My location" as a trip start: pinned to the building you're in (or right beside), when you are. */
+  const meAt = useCallback(
+    (p: LngLat): PointEndpoint => {
+      const building = data ? buildingAt(data.buildings, p, PIN_TO_BUILDING_M) : null;
+      return building
+        ? { kind: "point", lngLat: buildingCentre(building), label: "My location", building }
+        : { kind: "point", lngLat: p, label: "My location" };
+    },
+    [data],
+  );
+  /** Where your dot goes: in the middle of the building you're in, else where the GPS says. */
+  const here = useMemo(() => (myLocation ? meAt(myLocation).lngLat : null), [myLocation, meAt]);
+
   /** When to leave the current start for a class (null without a start or a route). */
   const estimateClass = useCallback(
     (buildingId: string, startsAt: Date): Route | null => {
-      const start = from ?? (myLocation ? ({ kind: "point", lngLat: myLocation, label: "My location" } as Endpoint) : null);
+      const start = from ?? (myLocation ? meAt(myLocation) : null);
       const building = data?.buildingById.get(buildingId);
       if (!start || !building) return null;
       const arrive = new Date(startsAt.getTime() - CLASS_BUFFER_MIN * 60_000);
@@ -326,7 +332,7 @@ export function App() {
       const w = mode === "accessible" ? planFor("walk", start, dest, arrive) : null;
       return w?.ok ? w.route : null;
     },
-    [data, from, myLocation, mode, planFor, transitFor],
+    [data, from, myLocation, meAt, mode, planFor, transitFor],
   );
 
   /** Getting from one class's building to the next (the day view): on foot, or by bike / step-free in those modes. */
@@ -429,7 +435,7 @@ export function App() {
     const orientation = (window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<string> } }).DeviceOrientationEvent;
     orientation?.requestPermission?.().catch(() => {});
     const startHere = (p: LngLat) => {
-      setFrom({ kind: "point", lngLat: p, label: "My location" });
+      setFrom(meAt(p));
       setClickTarget("to");
       setHint(null);
     };
@@ -462,8 +468,9 @@ export function App() {
   const fromIsMe = from?.kind === "point" && from.label === "My location";
   useEffect(() => {
     if (!fromIsMe || navigating || !myLocation || from?.kind !== "point") return;
-    if (from.lngLat[0] !== myLocation[0] || from.lngLat[1] !== myLocation[1]) setFromRaw({ ...from, lngLat: myLocation });
-  }, [myLocation, fromIsMe, navigating]);
+    const me = meAt(myLocation);
+    if (from.lngLat[0] !== me.lngLat[0] || from.lngLat[1] !== me.lngLat[1] || from.building !== me.building) setFromRaw(me);
+  }, [myLocation, fromIsMe, navigating, meAt]);
   // The cone: your compass, else the way you're moving, else the way the route sets off.
   const routeBearing = useMemo(() => {
     const c = fromIsMe ? route?.coordinates : undefined;
@@ -526,11 +533,11 @@ export function App() {
     const building = data?.buildingById.get(meeting.buildingId);
     if (!building) return setHint("That class isn't at a building on the map.");
     setTab("go");
-    setToRaw(withRoom({ kind: "building", building, room: meeting.room }));
+    setToRaw(({ kind: "building", building, room: meeting.room }));
     const fromBuilding = opts.from ? data?.buildingById.get(opts.from.buildingId) : undefined;
-    if (fromBuilding) setFromRaw(withRoom({ kind: "building", building: fromBuilding, room: opts.from?.room }));
+    if (fromBuilding) setFromRaw(({ kind: "building", building: fromBuilding, room: opts.from?.room }));
     else if (opts.fromHome && saved.home) setFromRaw({ kind: "place", place: saved.home });
-    else if (myLocation) setFromRaw({ kind: "point", lngLat: myLocation, label: "My location" });
+    else if (myLocation) setFromRaw(meAt(myLocation));
     else if (!from) {
       setClickTarget("from");
       setHint("Choose a start: use your location, search, or click the map.");
@@ -552,7 +559,7 @@ export function App() {
     const building = data?.buildingById.get(meeting.buildingId);
     if (!building || !saved.home) return;
     setTab("go");
-    setFromRaw(withRoom({ kind: "building", building, room: meeting.room }));
+    setFromRaw(({ kind: "building", building, room: meeting.room }));
     setToRaw({ kind: "place", place: saved.home });
     if (building.access === "shuttle" && mode !== "bike") setMode("bus");
     setTiming(leaveAt > new Date() ? { kind: "depart", at: leaveAt } : { kind: "now" });
@@ -603,7 +610,7 @@ export function App() {
           reportPin={tab === "report" ? reportPin : null}
           pickingSpot={tab === "report"}
           focus={focus}
-          userPos={navigating ? userPos : myLocation}
+          userPos={navigating ? userPos : here}
           follow={navigating}
           doors={(destBuilding?.entrances ?? []).map((d) => ({ lngLat: d.lngLat, used: d === inside?.entrance }))}
           room={
