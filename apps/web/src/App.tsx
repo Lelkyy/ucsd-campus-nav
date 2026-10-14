@@ -26,6 +26,7 @@ import {
   type ModeId,
   type Plan,
   type Route,
+  type SharedBike,
 } from "@campus/core";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { BuildingSearch } from "./BuildingSearch.tsx";
@@ -33,6 +34,8 @@ import { loadCampus, storage, type CampusData } from "./data.ts";
 import { Itinerary, formatDistance, formatTime } from "./Itinerary.tsx";
 import { PALETTE } from "./palette.ts";
 import { MapLayersMenu } from "./MapLayersMenu.tsx";
+import { SpinButton } from "./SpinButton.tsx";
+import { fetchSpinEbikes, SPIN_REFRESH_MS } from "./spin.ts";
 import { MapView, type BaseMap, type CampusPlaces, type DayOverlay, type RouteLine } from "./MapView.tsx";
 import {
   BikeIcon,
@@ -108,6 +111,10 @@ export function App() {
     return saved in MODES ? (saved as ModeId) : "walk";
   });
   const [myLocation, setMyLocationRaw] = useState<LngLat | null>(null);
+  /** Spin e-bikes: shown while the Spin button is on, refreshed as often as the feed changes. */
+  const [spinOn, setSpinOn] = useState(false);
+  const [spinBikes, setSpinBikes] = useState<SharedBike[] | null>(null);
+  const [spinLoading, setSpinLoading] = useState(false);
   // Small GPS jitter would re-plan everything that starts from your location; move the dot every ~10 m.
   const setMyLocation = useCallback(
     (p: LngLat) => setMyLocationRaw((cur) => (cur && haversine(cur[0], cur[1], p[0], p[1]) < 10 ? cur : p)),
@@ -300,6 +307,33 @@ export function App() {
       : (route.arriveAt.getTime() - bestTransit.route.arriveAt.getTime()) / 60_000;
     return saved >= SUGGEST_MIN_FASTER ? { route: bestTransit.route, savedMin: Math.round(saved) } : null;
   }, [mode, bestTransit, route, arriveBy]);
+
+  useEffect(() => {
+    if (!spinOn) {
+      setSpinBikes(null);
+      return;
+    }
+    let stopped = false;
+    let first = true;
+    const load = () => {
+      setSpinLoading(true);
+      fetchSpinEbikes()
+        .then((bikes) => {
+          if (stopped) return;
+          setSpinBikes(bikes);
+          if (first && !bikes.length) setHint("No Spin e-bikes are free to ride right now.");
+          first = false;
+        })
+        .catch(() => !stopped && first && setHint("Couldn't load Spin e-bikes. Try again in a moment."))
+        .finally(() => !stopped && setSpinLoading(false));
+    };
+    load();
+    const timer = setInterval(load, SPIN_REFRESH_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [spinOn]);
 
   /** "My location" as a trip start: pinned to the building you're in (or right beside), when you are. */
   const meAt = useCallback(
@@ -602,6 +636,7 @@ export function App() {
           baseMap={baseMap}
           places={campusPlaces}
           placeCategories={placeCategories}
+          spinBikes={spinBikes}
           onPlaceDirections={(p) => {
             setTab("go");
             setTo({ kind: "point", lngLat: p.lngLat, label: p.name });
@@ -630,6 +665,7 @@ export function App() {
           onCategories={setPlaceCategories}
           nearYou={!!here}
         />
+        <SpinButton on={spinOn} loading={spinLoading} onToggle={() => setSpinOn((v) => !v)} />
       </div>
 
       <aside className={`sheet ${sheetOpen ? "open" : ""}`} aria-label="Directions and schedule">

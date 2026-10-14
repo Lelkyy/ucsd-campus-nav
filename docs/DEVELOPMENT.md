@@ -351,6 +351,18 @@ are shown (`NEAREST_PLACES`), or nearest to the middle of the map when your
 location isn't known, updating as you pan. Tapping one shows what and where it
 is, with Directions here. UCSD's points can be 10–60 m off.
 
+**Spin e-bikes:** the round orange "spin" button with the map buttons shows the
+5 Spin e-bikes free to ride nearest to you, or to the middle of the map. It
+reads Spin's public GBFS feeds (General Bikeshare Feed Specification) for San
+Diego, which is the UCSD fleet, straight from the browser (`apps/web/src/spin.ts`;
+these feeds allow it, though the index that lists them doesn't).
+`freeEbikes` in `packages/core/src/gbfs.ts` keeps bicycles with a motor that
+aren't reserved or out of order (scooters and pedal bikes are left out). While
+the button is on, positions refresh every 60 s, the feed's `ttl`. Tapping one
+shows its battery, range and distance, with Directions. The badge is styled text
+in Spin's orange, not Spin's logo artwork.
+
+
 ## Search
 
 `CampusSearch` (`packages/core/src/campusSearch.ts`, on
@@ -449,6 +461,9 @@ makes MTS free, and the app assumes you have one unless you untick it. Update
 
 ## Data & licenses
 
+- Spin e-bikes: Spin's public GBFS feeds for San Diego (listed in MobilityData's
+  GBFS catalog). "Spin" is Spin's trademark; check their terms before a public
+  release.
 - Elevation: [Terrain Tiles on AWS](https://registry.opendata.aws/terrain-tiles/)
   (Mapzen terrarium tiles; around here mostly USGS 3DEP, public domain). Their
   attribution terms ask to credit the sources.

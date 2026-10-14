@@ -205,6 +205,35 @@ button.link.danger { color: var(--danger); }
 }
 .map-chip.on { background: var(--accent); color: var(--accent-text); }
 
+/* Spin e-bikes button: a round badge in Spin's orange */
+.spin-chip {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: grid;
+  place-items: center;
+}
+.spin-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #ff5a1f;
+  color: #fff;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: -0.02em;
+}
+.spin-chip.on { box-shadow: 0 0 0 3px #ff5a1f, var(--shadow); }
+.spin-mark.loading { animation: spin-pulse 1s ease-in-out infinite; }
+@keyframes spin-pulse { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .spin-mark.loading { animation: none; } }
+
 /* Map style and places menu */
 .layers { position: relative; display: flex; flex-direction: column; align-items: flex-end; }
 .layers-count { min-width: 17px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-size: 11px; font-weight: 700; }

@@ -1,4 +1,4 @@
-import { haversine, type CampusGraph, type LngLat, type TransitStop } from "@campus/core";
+import { haversine, type CampusGraph, type LngLat, type SharedBike, type TransitStop } from "@campus/core";
 import {
   GeolocateControl,
   LngLatBounds,
@@ -14,6 +14,7 @@ import {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { PALETTE } from "./palette.ts";
+import { formatDistance } from "./Itinerary.tsx";
 // MapLibre 6 derives its worker URL at runtime, which bundlers can't see; have Vite bundle it.
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { useEffect, useRef, useState } from "react";
@@ -28,6 +29,11 @@ const UCSD_VECTOR_TILES = "https://tiles.arcgis.com/tiles/mXNwDpiENQiMIzRv/arcgi
 
 /** The map underneath: the official campus map, or UCSD's illustrated one on top of it. */
 export type BaseMap = "campus" | "illustrated";
+
+/** How many Spin e-bikes to show: the nearest. */
+const NEAREST_SPIN = 5;
+/** Spin's brand orange. */
+const SPIN_ORANGE = "#FF5A1F";
 
 /** How many of each kind of place to show: the nearest. */
 export const NEAREST_PLACES = 5;
@@ -93,6 +99,8 @@ export interface MapViewProps {
   from: LngLat | null;
   to: LngLat | null;
   baseMap: BaseMap;
+  /** Spin e-bikes free to ride (the nearest few are drawn), or null when the Spin button is off. */
+  spinBikes: SharedBike[] | null;
   /** UCSD's places, and the categories to show. */
   places: CampusPlaces | null;
   placeCategories: string[];
@@ -217,7 +225,7 @@ export function MapView(props: MapViewProps) {
       });
       for (const layer of UCSD_LAYERS) map.addLayer({ ...layer, layout: { ...layer.layout, visibility: "none" } } as LayerSpecification);
 
-      for (const id of ["route", "connectors", "stops", "doors", "day", "places"]) {
+      for (const id of ["route", "connectors", "stops", "doors", "day", "places", "spin"]) {
         map.addSource(id, { type: "geojson", data: EMPTY });
       }
       // UCSD's places, under everything of the app's; names once zoomed in.
@@ -249,6 +257,33 @@ export function MapView(props: MapViewProps) {
           "text-optional": true,
         },
         paint: { "text-color": ["get", "color"], "text-halo-color": PALETTE.white, "text-halo-width": 1.5 },
+      });
+      // Spin e-bikes: Spin orange, with the battery once zoomed in.
+      map.addLayer({
+        id: "spin",
+        type: "circle",
+        source: "spin",
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 5, 17, 8, 19, 10],
+          "circle-color": SPIN_ORANGE,
+          "circle-stroke-color": PALETTE.white,
+          "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 14, 1.5, 17, 2.5],
+        },
+      });
+      map.addLayer({
+        id: "spin-labels",
+        type: "symbol",
+        source: "spin",
+        minzoom: 16,
+        layout: {
+          "text-field": ["get", "label"],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 11,
+          "text-offset": [0, 1.1],
+          "text-anchor": "top",
+          "text-optional": true,
+        },
+        paint: { "text-color": SPIN_ORANGE, "text-halo-color": PALETTE.white, "text-halo-width": 1.5 },
       });
       map.addLayer({
         id: "stops",
@@ -379,6 +414,24 @@ export function MapView(props: MapViewProps) {
     });
 
     map.on("click", (e) => {
+      // A Spin e-bike: its battery and range, and directions to it.
+      const box: [[number, number], [number, number]] = [
+        [e.point.x - 8, e.point.y - 8],
+        [e.point.x + 8, e.point.y + 8],
+      ];
+      const bike = map.getLayer("spin") ? map.queryRenderedFeatures(box, { layers: ["spin"] })[0] : undefined;
+      if (bike && bike.geometry.type === "Point") {
+        const at = bike.geometry.coordinates as LngLat;
+        popup.current?.remove();
+        popup.current = new Popup({ closeButton: true, maxWidth: "240px", className: "place-popup" })
+          .setLngLat(at)
+          .setDOMContent(placeCard("Spin e-bike", (bike.properties as { detail: string }).detail, "", () => {
+            popup.current?.remove();
+            callbacks.current.onPlaceDirections({ lngLat: at, name: "Spin e-bike" });
+          }))
+          .addTo(map);
+        return;
+      }
       // A place: what it is, and directions to it; anywhere else drops a pin as before.
       const hit = map.getLayer("places")
         ? map.queryRenderedFeatures([
@@ -401,8 +454,10 @@ export function MapView(props: MapViewProps) {
       }
       callbacks.current.onMapClick([e.lngLat.lng, e.lngLat.lat]);
     });
-    map.on("mouseenter", "places", () => (map.getCanvas().style.cursor = "pointer"));
-    map.on("mouseleave", "places", () => (map.getCanvas().style.cursor = ""));
+    for (const layer of ["places", "spin"]) {
+      map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
+    }
 
     return () => map.remove();
   }, []);
@@ -451,6 +506,35 @@ export function MapView(props: MapViewProps) {
       })),
     });
   }, [ready, props.places, props.placeCategories, anchor?.[0], anchor?.[1]]);
+
+  // Spin e-bikes: the nearest few to you (or the middle of the map).
+  useEffect(() => {
+    if (!ready) return;
+    const bikes = props.spinBikes ?? [];
+    const near = anchor
+      ? bikes
+          .map((b) => ({ b, m: haversine(anchor[0], anchor[1], b.lngLat[0], b.lngLat[1]) }))
+          .sort((x, y) => x.m - y.m)
+          .slice(0, NEAREST_SPIN)
+      : [];
+    source(mapRef.current!, "spin").setData({
+      type: "FeatureCollection",
+      features: near.map(({ b, m }) => {
+        const battery = b.battery !== undefined ? `${Math.round(b.battery * 100)}% battery` : "";
+        const range = b.rangeMeters !== undefined ? `about ${(b.rangeMeters / 1609).toFixed(0)} mi of range` : "";
+        const away = `${formatDistance(m)} from ${props.userPos ? "you" : "the map's middle"}`;
+        return {
+          type: "Feature",
+          properties: {
+            label: b.battery !== undefined ? `${Math.round(b.battery * 100)}%` : "",
+            detail: [battery, range, away].filter(Boolean).join(" · "),
+          },
+          geometry: { type: "Point", coordinates: b.lngLat },
+        };
+      }),
+    });
+    if (!props.spinBikes) popup.current?.remove();
+  }, [ready, props.spinBikes, anchor?.[0], anchor?.[1], props.userPos]);
 
   useEffect(() => {
     if (!ready) return;
