@@ -30,7 +30,7 @@ const UCSD_VECTOR_TILES = "https://tiles.arcgis.com/tiles/mXNwDpiENQiMIzRv/arcgi
 /** The map underneath: the official campus map, or UCSD's illustrated one on top of it. */
 export type BaseMap = "campus" | "illustrated";
 
-/** How many Spin e-bikes to show: the nearest. */
+/** How many Spin e-bikes, and how many scooters, to show: the nearest. */
 const NEAREST_SPIN = 5;
 /** Spin's brand orange. */
 const SPIN_ORANGE = "#FF5A1F";
@@ -99,7 +99,7 @@ export interface MapViewProps {
   from: LngLat | null;
   to: LngLat | null;
   baseMap: BaseMap;
-  /** Spin e-bikes free to ride (the nearest few are drawn), or null when the Spin button is off. */
+  /** Spin e-bikes and scooters free to ride (the nearest few of each are drawn), or null when the Spin button is off. */
   spinBikes: SharedBike[] | null;
   /** UCSD's places, and the categories to show. */
   places: CampusPlaces | null;
@@ -258,15 +258,26 @@ export function MapView(props: MapViewProps) {
         },
         paint: { "text-color": ["get", "color"], "text-halo-color": PALETTE.white, "text-halo-width": 1.5 },
       });
-      // Spin e-bikes: Spin orange, with the battery once zoomed in.
+      // Spin vehicles in Spin orange: e-bikes solid and larger, scooters white with an orange ring;
+      // the battery once zoomed in.
       map.addLayer({
         id: "spin",
         type: "circle",
         source: "spin",
         paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, 5, 17, 8, 19, 10],
-          "circle-color": SPIN_ORANGE,
-          "circle-stroke-color": PALETTE.white,
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            14,
+            ["case", ["==", ["get", "kind"], "ebike"], 5, 4],
+            17,
+            ["case", ["==", ["get", "kind"], "ebike"], 8, 6],
+            19,
+            ["case", ["==", ["get", "kind"], "ebike"], 10, 8],
+          ],
+          "circle-color": ["case", ["==", ["get", "kind"], "ebike"], SPIN_ORANGE, PALETTE.white],
+          "circle-stroke-color": ["case", ["==", ["get", "kind"], "ebike"], PALETTE.white, SPIN_ORANGE],
           "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 14, 1.5, 17, 2.5],
         },
       });
@@ -425,9 +436,9 @@ export function MapView(props: MapViewProps) {
         popup.current?.remove();
         popup.current = new Popup({ closeButton: true, maxWidth: "240px", className: "place-popup" })
           .setLngLat(at)
-          .setDOMContent(placeCard("Spin e-bike", (bike.properties as { detail: string }).detail, "", () => {
+          .setDOMContent(placeCard((bike.properties as { name: string }).name, (bike.properties as { detail: string }).detail, "", () => {
             popup.current?.remove();
-            callbacks.current.onPlaceDirections({ lngLat: at, name: "Spin e-bike" });
+            callbacks.current.onPlaceDirections({ lngLat: at, name: (bike.properties as { name: string }).name });
           }))
           .addTo(map);
         return;
@@ -507,16 +518,18 @@ export function MapView(props: MapViewProps) {
     });
   }, [ready, props.places, props.placeCategories, anchor?.[0], anchor?.[1]]);
 
-  // Spin e-bikes: the nearest few to you (or the middle of the map).
+  // Spin vehicles: the nearest few e-bikes and the nearest few scooters to you (or the middle of the map).
   useEffect(() => {
     if (!ready) return;
     const bikes = props.spinBikes ?? [];
-    const near = anchor
-      ? bikes
-          .map((b) => ({ b, m: haversine(anchor[0], anchor[1], b.lngLat[0], b.lngLat[1]) }))
-          .sort((x, y) => x.m - y.m)
-          .slice(0, NEAREST_SPIN)
-      : [];
+    const nearest = (kind: SharedBike["kind"]) =>
+      bikes
+        .filter((b) => b.kind === kind)
+        .map((b) => ({ b, m: haversine(anchor![0], anchor![1], b.lngLat[0], b.lngLat[1]) }))
+        .sort((x, y) => x.m - y.m)
+        .slice(0, NEAREST_SPIN);
+    // Scooters first, so e-bikes draw on top.
+    const near = anchor ? [...nearest("scooter"), ...nearest("ebike")] : [];
     source(mapRef.current!, "spin").setData({
       type: "FeatureCollection",
       features: near.map(({ b, m }) => {
@@ -526,6 +539,8 @@ export function MapView(props: MapViewProps) {
         return {
           type: "Feature",
           properties: {
+            kind: b.kind,
+            name: b.kind === "ebike" ? "Spin e-bike" : "Spin scooter",
             label: b.battery !== undefined ? `${Math.round(b.battery * 100)}%` : "",
             detail: [battery, range, away].filter(Boolean).join(" · "),
           },

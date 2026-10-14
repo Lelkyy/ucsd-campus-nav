@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { freeEbikes } from "./gbfs.ts";
+import { freeVehicles } from "./gbfs.ts";
 
-describe("GBFS e-bikes", () => {
+describe("GBFS vehicles", () => {
   const types = {
     data: {
       vehicle_types: [
@@ -13,7 +13,7 @@ describe("GBFS e-bikes", () => {
   };
   const bike = (id: string, type: string, extra = {}) => ({ bike_id: id, lat: 32.88, lon: -117.24, vehicle_type_id: type, ...extra });
 
-  it("keeps e-bikes free to ride, not scooters, pedal bikes, reserved or broken ones", () => {
+  it("keeps e-bikes and scooters free to ride, not pedal bikes, reserved or broken ones", () => {
     const status = {
       data: {
         bikes: [
@@ -25,6 +25,9 @@ describe("GBFS e-bikes", () => {
         ],
       },
     };
-    expect(freeEbikes(types, status)).toEqual([{ id: "a", lngLat: [-117.24, 32.88], battery: 0.7, rangeMeters: 40000 }]);
+    expect(freeVehicles(types, status)).toEqual([
+      { id: "a", kind: "ebike", lngLat: [-117.24, 32.88], battery: 0.7, rangeMeters: 40000 },
+      { id: "b", kind: "scooter", lngLat: [-117.24, 32.88], battery: undefined, rangeMeters: undefined },
+    ]);
   });
 });

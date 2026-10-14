@@ -351,16 +351,25 @@ are shown (`NEAREST_PLACES`), or nearest to the middle of the map when your
 location isn't known, updating as you pan. Tapping one shows what and where it
 is, with Directions here. UCSD's points can be 10–60 m off.
 
-**Spin e-bikes:** the round orange "spin" button with the map buttons shows the
-5 Spin e-bikes free to ride nearest to you, or to the middle of the map. It
-reads Spin's public GBFS feeds (General Bikeshare Feed Specification) for San
-Diego, which is the UCSD fleet, straight from the browser (`apps/web/src/spin.ts`;
-these feeds allow it, though the index that lists them doesn't).
-`freeEbikes` in `packages/core/src/gbfs.ts` keeps bicycles with a motor that
-aren't reserved or out of order (scooters and pedal bikes are left out). While
-the button is on, positions refresh every 60 s, the feed's `ttl`. Tapping one
-shows its battery, range and distance, with Directions. The badge is styled text
-in Spin's orange, not Spin's logo artwork.
+**Spin e-bikes and scooters:** the round orange "spin" button with the map buttons
+shows the 5 nearest Spin e-bikes and the 5 nearest Spin scooters free to ride,
+nearest to you or to the middle of the map. E-bikes are solid orange dots;
+scooters are white with an orange ring. It reads Spin's public GBFS feeds
+(General Bikeshare Feed Specification) for San Diego, which is the UCSD fleet,
+straight from the browser (`apps/web/src/spin.ts`; these feeds allow it, though
+the index that lists them doesn't). `freeVehicles` in `packages/core/src/gbfs.ts`
+keeps motor-assisted bicycles and scooters that aren't reserved or out of order.
+While the button is on, positions refresh every 60 s, the feed's `ttl`. Tapping
+one shows its battery, range and distance, with Directions.
+- **Fleet:** the feed has about 740 scooters and only about 9 e-bikes. There are
+  no Spin hubs in it, and no other operator publishes a feed for San Diego (Lyft
+  doesn't operate here; Lime has no public San Diego feed).
+- **Spin's API terms** (spin.app/policies/gbfs-terms) allow showing Spin
+  vehicles in an app. They don't allow implying Spin's endorsement, building a
+  stored dataset from the feed, or linking vehicles to people. The app only
+  fetches live data and stores nothing. The badge is styled text in Spin's
+  orange, not Spin's logo, and its tooltip says the app isn't affiliated with
+  Spin.
 
 
 ## Search
@@ -461,9 +470,10 @@ makes MTS free, and the app assumes you have one unless you untick it. Update
 
 ## Data & licenses
 
-- Spin e-bikes: Spin's public GBFS feeds for San Diego (listed in MobilityData's
-  GBFS catalog). "Spin" is Spin's trademark; check their terms before a public
-  release.
+- Spin e-bikes and scooters: Spin's public GBFS feeds for San Diego (listed in
+  MobilityData's GBFS catalog), under Spin's API terms
+  (https://www.spin.app/policies/gbfs-terms). "Spin" is Spin's trademark; the app
+  isn't affiliated with Spin.
 - Elevation: [Terrain Tiles on AWS](https://registry.opendata.aws/terrain-tiles/)
   (Mapzen terrarium tiles; around here mostly USGS 3DEP, public domain). Their
   attribution terms ask to credit the sources.

@@ -35,7 +35,7 @@ import { Itinerary, formatDistance, formatTime } from "./Itinerary.tsx";
 import { PALETTE } from "./palette.ts";
 import { MapLayersMenu } from "./MapLayersMenu.tsx";
 import { SpinButton } from "./SpinButton.tsx";
-import { fetchSpinEbikes, SPIN_REFRESH_MS } from "./spin.ts";
+import { fetchSpinVehicles, SPIN_REFRESH_MS } from "./spin.ts";
 import { MapView, type BaseMap, type CampusPlaces, type DayOverlay, type RouteLine } from "./MapView.tsx";
 import {
   BikeIcon,
@@ -111,7 +111,7 @@ export function App() {
     return saved in MODES ? (saved as ModeId) : "walk";
   });
   const [myLocation, setMyLocationRaw] = useState<LngLat | null>(null);
-  /** Spin e-bikes: shown while the Spin button is on, refreshed as often as the feed changes. */
+  /** Spin e-bikes and scooters: shown while the Spin button is on, refreshed as often as the feed changes. */
   const [spinOn, setSpinOn] = useState(false);
   const [spinBikes, setSpinBikes] = useState<SharedBike[] | null>(null);
   const [spinLoading, setSpinLoading] = useState(false);
@@ -317,14 +317,14 @@ export function App() {
     let first = true;
     const load = () => {
       setSpinLoading(true);
-      fetchSpinEbikes()
+      fetchSpinVehicles()
         .then((bikes) => {
           if (stopped) return;
           setSpinBikes(bikes);
-          if (first && !bikes.length) setHint("No Spin e-bikes are free to ride right now.");
+          if (first && !bikes.length) setHint("No Spin e-bikes or scooters are free to ride right now.");
           first = false;
         })
-        .catch(() => !stopped && first && setHint("Couldn't load Spin e-bikes. Try again in a moment."))
+        .catch(() => !stopped && first && setHint("Couldn't load Spin vehicles. Try again in a moment."))
         .finally(() => !stopped && setSpinLoading(false));
     };
     load();
