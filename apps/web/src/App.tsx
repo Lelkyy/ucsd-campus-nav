@@ -27,6 +27,7 @@ import {
   type Plan,
   type Route,
   type SharedBike,
+  type LiveVehicle,
 } from "@campus/core";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { BuildingSearch } from "./BuildingSearch.tsx";
@@ -36,6 +37,8 @@ import { PALETTE } from "./palette.ts";
 import { MapLayersMenu } from "./MapLayersMenu.tsx";
 import { SpinButton } from "./SpinButton.tsx";
 import { fetchSpinVehicles, SPIN_REFRESH_MS } from "./spin.ts";
+import { LiveTransitButton } from "./LiveTransitButton.tsx";
+import { fetchLiveVehicles, MTS_LIVE, LIVE_REFRESH_MS } from "./mts.ts";
 import { MapView, type BaseMap, type CampusPlaces, type DayOverlay, type RouteLine } from "./MapView.tsx";
 import {
   BikeIcon,
@@ -115,6 +118,19 @@ export function App() {
   const [spinOn, setSpinOn] = useState(false);
   const [spinBikes, setSpinBikes] = useState<SharedBike[] | null>(null);
   const [spinLoading, setSpinLoading] = useState(false);
+  /** Live trolleys and buses: shown while their buttons are on, refreshed every ~20 s (one request for both). */
+  const [liveModes, setLiveModes] = useState<{ trolley: boolean; bus: boolean }>({ trolley: false, bus: false });
+  const [live, setLive] = useState<{ vehicles: LiveVehicle[]; at: number } | null>(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const liveOn = liveModes.trolley || liveModes.bus;
+  const toggleLive = (mode: "trolley" | "bus") =>
+    MTS_LIVE
+      ? setLiveModes((m) => ({ ...m, [mode]: !m[mode] }))
+      : setHint("Live trolleys and buses need an MTS real-time API key: request one at sdmts.com, then set VITE_MTS_KEY in apps/web/.env.local.");
+  const shownLive = useMemo(
+    () => (live ? { at: live.at, vehicles: live.vehicles.filter((v) => liveModes[v.mode]) } : null),
+    [live, liveModes],
+  );
   // Small GPS jitter would re-plan everything that starts from your location; move the dot every ~10 m.
   const setMyLocation = useCallback(
     (p: LngLat) => setMyLocationRaw((cur) => (cur && haversine(cur[0], cur[1], p[0], p[1]) < 10 ? cur : p)),
@@ -334,6 +350,33 @@ export function App() {
       clearInterval(timer);
     };
   }, [spinOn]);
+
+  useEffect(() => {
+    if (!liveOn) {
+      setLive(null);
+      return;
+    }
+    let stopped = false;
+    let first = true;
+    const load = () => {
+      setLiveLoading(true);
+      fetchLiveVehicles()
+        .then((t) => {
+          if (stopped) return;
+          setLive(t);
+          if (first && !t.vehicles.length) setHint("No trolleys or buses are running right now.");
+          first = false;
+        })
+        .catch(() => !stopped && first && setHint("Couldn't load live trolleys and buses from MTS. Try again in a moment."))
+        .finally(() => !stopped && setLiveLoading(false));
+    };
+    load();
+    const timer = setInterval(load, LIVE_REFRESH_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [liveOn]);
 
   /** "My location" as a trip start: pinned to the building you're in (or right beside), when you are. */
   const meAt = useCallback(
@@ -637,6 +680,7 @@ export function App() {
           places={campusPlaces}
           placeCategories={placeCategories}
           spinBikes={spinBikes}
+          live={shownLive}
           onPlaceDirections={(p) => {
             setTab("go");
             setTo({ kind: "point", lngLat: p.lngLat, label: p.name });
@@ -666,6 +710,8 @@ export function App() {
           nearYou={!!here}
         />
         <SpinButton on={spinOn} loading={spinLoading} onToggle={() => setSpinOn((v) => !v)} />
+        <LiveTransitButton mode="trolley" on={liveModes.trolley} loading={liveLoading && liveModes.trolley} onToggle={() => toggleLive("trolley")} />
+        <LiveTransitButton mode="bus" on={liveModes.bus} loading={liveLoading && liveModes.bus} onToggle={() => toggleLive("bus")} />
       </div>
 
       <aside className={`sheet ${sheetOpen ? "open" : ""}`} aria-label="Directions and schedule">

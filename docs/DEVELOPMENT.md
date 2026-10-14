@@ -351,6 +351,29 @@ are shown (`NEAREST_PLACES`), or nearest to the middle of the map when your
 location isn't known, updating as you pan. Tapping one shows what and where it
 is, with Directions here. UCSD's points can be 10–60 m off.
 
+**Live trolleys and buses:** the "Trolleys" and "Buses" buttons with the map
+buttons show every MTS trolley, and every bus near campus, where it is right now.
+- **The data:** MTS's real-time OneBusAway API, `where/vehicles-for-agency/MTS.json`
+  (`apps/web/src/mts.ts`), read straight from the browser and refreshed every
+  20 s while either button is on, with one request for both. `liveVehicles` in
+  `packages/core/src/liveTransit.ts` keeps vehicles on a trip on light-rail
+  routes (GTFS route type 0) and bus routes (type 3).
+- **On the map:** each vehicle is a badge in its line's colour. Trolleys show a
+  tram icon, buses their route number, with an arrow for the way it's heading
+  (OneBusAway's orientation turned into a compass bearing, and kept pointing
+  the right way when the map is rotated). Buses are drawn only within about
+  3 km of campus.
+- **Tapping one** shows its line and destination, and its next stop with
+  arrival time ("Blue Line to UTC · Next: Executive Drive, in 3 min"; marked
+  "scheduled" when MTS has no live prediction).
+- **The key:** MTS requires an API key, requested with the form on
+  https://www.sdmts.com/business-center/app-developers/real-time-data (5–7
+  business days). Set it as `VITE_MTS_KEY` in `apps/web/.env.local` (see
+  `apps/web/.env.example`; the file stays out of git). Without one, the buttons
+  say so. Use is under MTS's developer license agreement
+  (https://www.sdmts.com/business-center/developers/terms-and-conditions).
+  The key ends up in the web app's code, as with any browser-only app.
+
 **Spin e-bikes and scooters:** the round orange "spin" button with the map buttons
 shows every Spin e-bike and scooter free to ride; the nearest-5 rule for places
 doesn't apply. Popups give the distance from you, or from the middle of the
@@ -471,6 +494,8 @@ makes MTS free, and the app assumes you have one unless you untick it. Update
 
 ## Data & licenses
 
+- Live trolleys and buses: MTS real-time data (OneBusAway API), under MTS's
+  developer license agreement.
 - Spin e-bikes and scooters: Spin's public GBFS feeds for San Diego (listed in
   MobilityData's GBFS catalog), under Spin's API terms
   (https://www.spin.app/policies/gbfs-terms). "Spin" is Spin's trademark; the app

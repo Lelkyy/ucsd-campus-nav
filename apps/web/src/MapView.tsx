@@ -1,4 +1,4 @@
-import { haversine, type CampusGraph, type LngLat, type SharedBike, type TransitStop } from "@campus/core";
+import { haversine, type CampusGraph, type LiveVehicle, type LngLat, type SharedBike, type TransitStop } from "@campus/core";
 import {
   GeolocateControl,
   LngLatBounds,
@@ -97,6 +97,8 @@ export interface MapViewProps {
   from: LngLat | null;
   to: LngLat | null;
   baseMap: BaseMap;
+  /** Live trolleys and buses, and the time the feed gave them (its times count from then), or null when off. */
+  live: { vehicles: LiveVehicle[]; at: number } | null;
   /** Spin e-bikes and scooters free to ride (all drawn), or null when the Spin button is off. */
   spinBikes: SharedBike[] | null;
   /** UCSD's places, and the categories to show. */
@@ -516,6 +518,62 @@ export function MapView(props: MapViewProps) {
     });
   }, [ready, props.places, props.placeCategories, anchor?.[0], anchor?.[1]]);
 
+  // Live trolleys and buses: a marker for each near campus (the map can't go further), in its line's
+  // color, with an arrow the way it's heading.
+  const trolleyMarkers = useRef(new Map<string, { marker: Marker; vehicle: LiveVehicle }>());
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    const markers = trolleyMarkers.current;
+    const [w, s, e, n] = props.graph.data.bbox;
+    const near = (v: LiveVehicle) => v.lngLat[0] > w - 0.03 && v.lngLat[0] < e + 0.03 && v.lngLat[1] > s - 0.03 && v.lngLat[1] < n + 0.03;
+    const now = new Map((props.live?.vehicles ?? []).filter(near).map((v) => [v.id, v]));
+    for (const [id, m] of markers) if (!now.has(id)) (m.marker.remove(), markers.delete(id));
+    for (const v of now.values()) {
+      let m = markers.get(v.id);
+      if (!m) {
+        const el = vehicleElement(v);
+        m = { marker: new Marker({ element: el }).setLngLat(v.lngLat).addTo(map), vehicle: v };
+        el.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const { vehicle } = markers.get(v.id)!;
+          popup.current?.remove();
+          popup.current = new Popup({ closeButton: true, maxWidth: "240px", className: "place-popup", offset: 18 })
+            .setLngLat(vehicle.lngLat)
+            .setDOMContent(vehicleCard(vehicle, trolleysAt.current))
+            .addTo(map);
+        });
+        markers.set(v.id, m);
+      }
+      m.vehicle = v;
+      m.marker.setLngLat(v.lngLat);
+      const el = m.marker.getElement();
+      el.style.setProperty("--line", v.color);
+      el.title = `${v.line}${v.headsign ? ` to ${v.headsign}` : ""}`;
+      el.classList.toggle("has-heading", v.heading !== undefined);
+      el.dataset.heading = String(v.heading ?? 0);
+    }
+    trolleysAt.current = props.live?.at ?? Date.now();
+    turnArrows();
+  }, [ready, props.live]);
+  const trolleysAt = useRef(Date.now());
+  // Arrows point the way on the map: allow for the map being rotated.
+  const turnArrows = () => {
+    const bearing = mapRef.current?.getBearing() ?? 0;
+    for (const { marker } of trolleyMarkers.current.values()) {
+      const el = marker.getElement();
+      el.style.setProperty("--heading", `${Number(el.dataset.heading) - bearing}deg`);
+    }
+  };
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    map.on("rotate", turnArrows);
+    return () => {
+      map.off("rotate", turnArrows);
+    };
+  }, [ready]);
+
   // Spin vehicles: every e-bike and scooter free to ride (not just the nearest few, unlike places).
   useEffect(() => {
     if (!ready) return;
@@ -900,6 +958,47 @@ const UCSD_GROUND: LayerSpecification[] = [
     paint: { "fill-color": "#e6dfc6", "fill-outline-color": "#9a927e" },
   },
 ];
+
+/**
+ * A trolley or bus on the map: a badge in its line's color (a trolley drawn as one, a bus with its
+ * route number), with an arrow for its heading.
+ */
+function vehicleElement(v: LiveVehicle): HTMLElement {
+  const el = document.createElement("div");
+  el.className = `trolley ${v.mode}`;
+  const arrow = document.createElement("span");
+  arrow.className = "trolley-arrow";
+  arrow.setAttribute("aria-hidden", "true");
+  const badge = document.createElement("span");
+  badge.className = "trolley-badge";
+  badge.setAttribute("aria-hidden", "true");
+  if (v.mode === "trolley") {
+    badge.innerHTML =
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.5h6M12 2.5V5"/><rect x="5.5" y="5" width="13" height="13" rx="3"/><path d="M5.5 11.5h13"/><path d="M8.5 21l1.5-3M15.5 21L14 18"/></svg>';
+  } else {
+    badge.textContent = v.route;
+  }
+  el.append(arrow, badge);
+  return el;
+}
+
+/** What a tapped trolley or bus says: its line and where it's going, and when it reaches its next stop. */
+function vehicleCard(v: LiveVehicle, feedAt: number): HTMLElement {
+  const el = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = `${v.mode === "bus" ? `Route ${v.line}` : v.line}${v.headsign ? ` to ${v.headsign}` : ""}`;
+  const meta = document.createElement("span");
+  meta.className = "place-popup-meta";
+  if (v.nextStop) {
+    const seconds = v.nextStop.inSeconds - (Date.now() - feedAt) / 1000;
+    const when = seconds < 45 ? "arriving now" : `in ${Math.round(seconds / 60)} min`;
+    meta.textContent = `Next: ${v.nextStop.name}, ${when}${v.predicted ? "" : " (scheduled)"}`;
+  } else {
+    meta.textContent = v.predicted ? "Live position" : "Position from the timetable";
+  }
+  el.append(title, meta);
+  return el;
+}
 
 /** The popup for a tapped place. */
 function placeCard(name: string, kind: string, building: string, onGo: () => void): HTMLElement {

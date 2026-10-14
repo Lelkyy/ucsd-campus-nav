@@ -50,6 +50,9 @@ the way, using the paths, stairs and bike paths students actually use.
   Parking lots can be walked anywhere.
 - **Two campus maps:** the official campus map (district names and campus
   boundary) or UC San Diego's illustrated one, with routes drawn on top.
+- **Live trolleys and buses:** every trolley and nearby bus on the map as it
+  moves, which way it's heading, and when it reaches its next stop (needs an
+  MTS real-time API key).
 - **Spin e-bikes and scooters:** tap the spin button to see every Spin e-bike
   and scooter free to ride, with battery, range and directions.
 - **Campus places:** the 5 nearest restrooms, food spots, vending machines,

@@ -234,6 +234,35 @@ button.link.danger { color: var(--danger); }
 @keyframes spin-pulse { 50% { opacity: 0.55; } }
 @media (prefers-reduced-motion: reduce) { .spin-mark.loading { animation: none; } }
 
+/* Live trolleys and buses: a badge in the line's color, with an arrow the way it's heading */
+.live-chip.loading svg { animation: spin-pulse 1s ease-in-out infinite; }
+.trolley { position: relative; width: 30px; height: 30px; cursor: pointer; }
+.trolley-badge {
+  position: absolute;
+  inset: 2px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--line, #4a6497);
+  color: #fff;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+.trolley.bus .trolley-badge { border-radius: 50%; font-size: 10px; font-weight: 800; letter-spacing: -0.02em; }
+.trolley.bus { width: 28px; height: 28px; }
+.trolley-arrow { position: absolute; inset: -9px; transform: rotate(var(--heading, 0deg)); display: none; pointer-events: none; }
+.trolley.has-heading .trolley-arrow { display: block; }
+.trolley-arrow::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 8px solid var(--line, #4a6497);
+}
+
 /* Map style and places menu */
 .layers { position: relative; display: flex; flex-direction: column; align-items: flex-end; }
 .layers-count { min-width: 17px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-size: 11px; font-weight: 700; }
