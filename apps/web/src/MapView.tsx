@@ -30,8 +30,6 @@ const UCSD_VECTOR_TILES = "https://tiles.arcgis.com/tiles/mXNwDpiENQiMIzRv/arcgi
 /** The map underneath: the official campus map, or UCSD's illustrated one on top of it. */
 export type BaseMap = "campus" | "illustrated";
 
-/** How many Spin e-bikes, and how many scooters, to show: the nearest. */
-const NEAREST_SPIN = 5;
 /** Spin's brand orange. */
 const SPIN_ORANGE = "#FF5A1F";
 
@@ -99,7 +97,7 @@ export interface MapViewProps {
   from: LngLat | null;
   to: LngLat | null;
   baseMap: BaseMap;
-  /** Spin e-bikes and scooters free to ride (the nearest few of each are drawn), or null when the Spin button is off. */
+  /** Spin e-bikes and scooters free to ride (all drawn), or null when the Spin button is off. */
   spinBikes: SharedBike[] | null;
   /** UCSD's places, and the categories to show. */
   places: CampusPlaces | null;
@@ -518,24 +516,18 @@ export function MapView(props: MapViewProps) {
     });
   }, [ready, props.places, props.placeCategories, anchor?.[0], anchor?.[1]]);
 
-  // Spin vehicles: the nearest few e-bikes and the nearest few scooters to you (or the middle of the map).
+  // Spin vehicles: every e-bike and scooter free to ride (not just the nearest few, unlike places).
   useEffect(() => {
     if (!ready) return;
-    const bikes = props.spinBikes ?? [];
-    const nearest = (kind: SharedBike["kind"]) =>
-      bikes
-        .filter((b) => b.kind === kind)
-        .map((b) => ({ b, m: haversine(anchor![0], anchor![1], b.lngLat[0], b.lngLat[1]) }))
-        .sort((x, y) => x.m - y.m)
-        .slice(0, NEAREST_SPIN);
     // Scooters first, so e-bikes draw on top.
-    const near = anchor ? [...nearest("scooter"), ...nearest("ebike")] : [];
+    const all = [...(props.spinBikes ?? [])].sort((a, b) => Number(a.kind === "ebike") - Number(b.kind === "ebike"));
     source(mapRef.current!, "spin").setData({
       type: "FeatureCollection",
-      features: near.map(({ b, m }) => {
+      features: all.map((b) => {
+        const m = anchor ? haversine(anchor[0], anchor[1], b.lngLat[0], b.lngLat[1]) : NaN;
         const battery = b.battery !== undefined ? `${Math.round(b.battery * 100)}% battery` : "";
         const range = b.rangeMeters !== undefined ? `about ${(b.rangeMeters / 1609).toFixed(0)} mi of range` : "";
-        const away = `${formatDistance(m)} from ${props.userPos ? "you" : "the map's middle"}`;
+        const away = Number.isFinite(m) ? `${formatDistance(m)} from ${props.userPos ? "you" : "the map's middle"}` : "";
         return {
           type: "Feature",
           properties: {

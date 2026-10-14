@@ -352,8 +352,9 @@ location isn't known, updating as you pan. Tapping one shows what and where it
 is, with Directions here. UCSD's points can be 10–60 m off.
 
 **Spin e-bikes and scooters:** the round orange "spin" button with the map buttons
-shows the 5 nearest Spin e-bikes and the 5 nearest Spin scooters free to ride,
-nearest to you or to the middle of the map. E-bikes are solid orange dots;
+shows every Spin e-bike and scooter free to ride; the nearest-5 rule for places
+doesn't apply. Popups give the distance from you, or from the middle of the
+map. E-bikes are solid orange dots;
 scooters are white with an orange ring. It reads Spin's public GBFS feeds
 (General Bikeshare Feed Specification) for San Diego, which is the UCSD fleet,
 straight from the browser (`apps/web/src/spin.ts`; these feeds allow it, though
