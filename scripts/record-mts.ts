@@ -48,8 +48,9 @@ async function write(rows: object[]) {
   if (!rows.length) return;
   const h = new Date().toISOString().slice(0, 13);
   if (h !== hour) {
-    if (hour) void gzipDone();
+    // The new hour first: gzipDone leaves the current hour's file alone and compresses the rest.
     hour = h;
+    void gzipDone();
   }
   appendFileSync(fileFor(hour), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
 }
