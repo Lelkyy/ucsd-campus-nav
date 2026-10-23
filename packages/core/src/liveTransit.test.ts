@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { alongPath, decodePolyline, decodeVehiclePositions, liveVehicles, measurePath, pathFrom, pathUntil, pointAlong, tripAhead, type LiveRoute } from "./liveTransit.ts";
+import { alongPath, decodePolyline, decodeTripUpdates, decodeVehiclePositions, liveVehicles, measurePath, pathFrom, pathUntil, pointAlong, tripAhead, type LiveRoute } from "./liveTransit.ts";
 
-/** A protobuf message from fields: [number, varint | string | float32 (as {f}) | nested fields]. */
-type Field = [number, number | string | { f: number } | Field[]];
+/** A protobuf message from fields: [number, varint | string | float32 (as {f}) | negative int32 (as {neg}) | nested fields]. */
+type Field = [number, number | string | { f: number } | { neg: number } | Field[]];
 function encode(fields: Field[]): number[] {
   const varint = (n: number) => {
     const out: number[] = [];
@@ -16,6 +16,18 @@ function encode(fields: Field[]): number[] {
   };
   return fields.flatMap(([f, v]) => {
     if (typeof v === "number") return [...varint(f * 8), ...varint(v)];
+    if (typeof v === "object" && "neg" in v) {
+      // Two's complement over 64 bits: ten bytes.
+      let n = BigInt.asUintN(64, BigInt(v.neg));
+      const out: number[] = [];
+      do {
+        let b = Number(n & 127n);
+        n >>= 7n;
+        if (n) b |= 0x80;
+        out.push(b);
+      } while (n);
+      return [...varint(f * 8), ...out];
+    }
     if (typeof v === "object" && "f" in v) {
       const b = new Uint8Array(4);
       new DataView(b.buffer).setFloat32(0, v.f, true);
@@ -210,5 +222,49 @@ describe("moving along a path", () => {
     expect(alongPath(path, [0.0005, 0.00102])).toBeCloseTo(166.8, 0);
     // Looking only from 120 m on, the first one maps to where the path is nearest after that.
     expect(alongPath(path, [0.00002, 0.0005], 120)).toBeGreaterThanOrEqual(120);
+  });
+});
+
+describe("MTS's predicted arrivals (GTFS-realtime trip updates)", () => {
+  const t = 1_792_790_984;
+  const feed = new Uint8Array(
+    encode([
+      [1, [[1, "1.0"], [3, t]]],
+      [
+        2,
+        [
+          [1, "19629352"],
+          [
+            3,
+            [
+              [1, [[1, "19629352"], [5, "8"]]],
+              [3, [[1, "910"]]],
+              [4, t - 47],
+              [5, { neg: -120 }],
+              [2, [[2, [[2, t + 60]]], [3, [[2, t + 90]]], [4, "94019"]]],
+              [2, [[1, 7], [2, [[2, t + 240]]], [4, "11575"]]],
+            ],
+          ],
+        ],
+      ],
+    ]),
+  );
+
+  it("reads each trip's vehicle, route and predicted times at the stops ahead", () => {
+    const { at, trips } = decodeTripUpdates(feed);
+    expect(at).toBe(t * 1000);
+    expect(trips).toEqual([
+      {
+        tripId: "19629352",
+        routeId: "8",
+        vehicleId: "910",
+        at: (t - 47) * 1000,
+        delay: -120,
+        stops: [
+          { stopId: "94019", arrival: (t + 60) * 1000, departure: (t + 90) * 1000 },
+          { stopId: "11575", stopSequence: 7, arrival: (t + 240) * 1000 },
+        ],
+      },
+    ]);
   });
 });

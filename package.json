@@ -15,7 +15,8 @@
     "fetch:rooms": "tsx scripts/fetch-rooms.ts",
     "test": "vitest run",
     "typecheck": "tsc -p packages/core && tsc -p packages/core/tsconfig.test.json && tsc -p apps/web && tsc -p scripts",
-    "fetch:places": "tsx scripts/fetch-campus-places.ts"
+    "fetch:places": "tsx scripts/fetch-campus-places.ts",
+    "record:mts": "tsx scripts/record-mts.ts"
   },
   "devDependencies": {
     "@mapbox/vector-tile": "^3.0.0",

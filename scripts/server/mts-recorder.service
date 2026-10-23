@@ -1,0 +1,17 @@
+# The MTS recorder as a service: starts at boot, restarts if it stops. Installed by setup-recorder.sh.
+[Unit]
+Description=Triton Trails MTS feed recorder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mts
+WorkingDirectory=/opt/ucsd-campus-nav
+EnvironmentFile=/etc/mts-recorder.env
+Environment=OUT_DIR=/var/lib/mts-recorder
+ExecStart=/opt/ucsd-campus-nav/node_modules/.bin/tsx scripts/record-mts.ts
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

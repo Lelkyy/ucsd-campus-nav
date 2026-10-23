@@ -37,17 +37,18 @@ export interface VehicleFix {
   bearing?: number;
 }
 
+type ProtoValue = number | [number, number];
+
 /**
- * The vehicle reports in a GTFS-realtime FeedMessage (protobuf): for each entity with a
- * VehiclePosition, its vehicle, trip, route, position and timestamp. Just enough of the format
- * to read them, so no protobuf library.
+ * Just enough of the protobuf wire format to read GTFS-realtime, so no protobuf library: `fields`
+ * calls back with each field in [start, end): its number, and a number, or a [start, end) for bytes.
  */
-export function decodeVehiclePositions(bytes: Uint8Array): { at: number; fixes: VehicleFix[] } {
+function protoReader(bytes: Uint8Array) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  // Calls back with each field in [start, end): its number, and a number, or a [start, end) for bytes.
-  const fields = (start: number, end: number, cb: (field: number, value: number | [number, number]) => void) => {
+  const fields = (start: number, end: number, cb: (field: number, value: ProtoValue) => void) => {
     let i = start;
     const varint = () => {
+      const first = i;
       let [n, scale] = [0, 1];
       let b: number;
       do {
@@ -55,6 +56,12 @@ export function decodeVehiclePositions(bytes: Uint8Array): { at: number; fixes: 
         n += (b & 0x7f) * scale;
         scale *= 128;
       } while (b & 0x80);
+      // A negative int32 (a delay) is ten bytes; its low 32 bits, from the first five, are the value.
+      if (i - first > 5) {
+        let lo = 0;
+        for (let k = 0, sc = 1; k < 5; k++, sc *= 128) lo += (bytes[first + k] & 0x7f) * sc;
+        return lo % 2 ** 32 | 0;
+      }
       return n;
     };
     while (i < end) {
@@ -75,13 +82,25 @@ export function decodeVehiclePositions(bytes: Uint8Array): { at: number; fixes: 
     }
   };
   // Ids are plain ASCII.
-  const str = (r: number | [number, number]) => (typeof r === "number" ? "" : String.fromCharCode(...bytes.subarray(r[0], r[1])));
-  const sub = (r: number | [number, number], cb: (field: number, value: number | [number, number]) => void) => typeof r !== "number" && fields(r[0], r[1], cb);
-  let at = 0;
+  const str = (r: ProtoValue) => (typeof r === "number" ? "" : String.fromCharCode(...bytes.subarray(r[0], r[1])));
+  const sub = (r: ProtoValue, cb: (field: number, value: ProtoValue) => void) => typeof r !== "number" && fields(r[0], r[1], cb);
+  /** The feed's header time and each entity, in order. */
+  const entities = (cb: (entity: ProtoValue) => void) => {
+    let at = 0;
+    fields(0, bytes.length, (f, v) => {
+      if (f === 1) sub(v, (g, x) => g === 3 && typeof x === "number" && (at = x * 1000));
+      if (f === 2) cb(v);
+    });
+    return at;
+  };
+  return { sub, str, entities };
+}
+
+/** The vehicle reports in a GTFS-realtime FeedMessage: for each VehiclePosition, its vehicle, trip, route, position and timestamp. */
+export function decodeVehiclePositions(bytes: Uint8Array): { at: number; fixes: VehicleFix[] } {
+  const { sub, str, entities } = protoReader(bytes);
   const fixes: VehicleFix[] = [];
-  fields(0, bytes.length, (f, v) => {
-    if (f === 1) sub(v, (g, x) => g === 3 && typeof x === "number" && (at = x * 1000));
-    if (f !== 2) return;
+  const at = entities((v) =>
     sub(v, (g, x) => {
       if (g !== 4) return;
       const fix: Partial<VehicleFix> & { lat?: number; lon?: number; label?: string } = {};
@@ -102,9 +121,64 @@ export function decodeVehiclePositions(bytes: Uint8Array): { at: number; fixes: 
           ...(fix.bearing !== undefined ? { bearing: fix.bearing } : {}),
         });
       }
-    });
-  });
+    }),
+  );
   return { at, fixes };
+}
+
+/** One trip's predicted times at the stops it hasn't reached yet, from a GTFS-realtime TripUpdate. */
+export interface TripUpdate {
+  tripId: string;
+  routeId?: string;
+  vehicleId?: string;
+  /** When the prediction was made (ms since the epoch). */
+  at: number;
+  /** How late the trip is running, in seconds, when the feed says (MTS rarely does). */
+  delay?: number;
+  stops: StopTimePrediction[];
+}
+
+export interface StopTimePrediction {
+  stopId: string;
+  stopSequence?: number;
+  /** Predicted arrival and departure (ms since the epoch). MTS rounds most to the minute. */
+  arrival?: number;
+  departure?: number;
+}
+
+/** The predictions in a GTFS-realtime TripUpdates feed (MTS's trip-updates-for-agency). */
+export function decodeTripUpdates(bytes: Uint8Array): { at: number; trips: TripUpdate[] } {
+  const { sub, str, entities } = protoReader(bytes);
+  const trips: TripUpdate[] = [];
+  const time = (r: ProtoValue) => {
+    let t: number | undefined;
+    sub(r, (k, z) => k === 2 && typeof z === "number" && (t = z * 1000));
+    return t;
+  };
+  const at = entities((v) =>
+    sub(v, (g, x) => {
+      if (g !== 3) return;
+      const trip: Partial<TripUpdate> & { stops: StopTimePrediction[] } = { stops: [] };
+      sub(x, (h, y) => {
+        if (h === 1) sub(y, (k, z) => (k === 1 ? (trip.tripId = str(z)) : k === 5 ? (trip.routeId = str(z)) : undefined));
+        else if (h === 3) sub(y, (k, z) => k === 1 && (trip.vehicleId = str(z)));
+        else if (h === 4 && typeof y === "number") trip.at = y * 1000;
+        else if (h === 5 && typeof y === "number") trip.delay = y;
+        else if (h === 2) {
+          const stop: Partial<StopTimePrediction> = {};
+          sub(y, (k, z) => {
+            if (k === 1 && typeof z === "number") stop.stopSequence = z;
+            else if (k === 4) stop.stopId = str(z);
+            else if (k === 2) stop.arrival = time(z);
+            else if (k === 3) stop.departure = time(z);
+          });
+          if (stop.stopId) trip.stops.push(stop as StopTimePrediction);
+        }
+      });
+      if (trip.tripId) trips.push({ ...trip, tripId: trip.tripId, at: trip.at ?? 0 });
+    }),
+  );
+  return { at, trips };
 }
 
 /** A route from OneBusAway's routes-for-agency list. */
