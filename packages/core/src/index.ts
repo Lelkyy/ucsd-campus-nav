@@ -17,5 +17,6 @@ export * from "./campusSearch.ts";
 export * from "./campusPlaces.ts";
 export * from "./gbfs.ts";
 export * from "./liveTransit.ts";
+export * from "./arrivals.ts";
 export * from "./warp.ts";
 export * from "./scooter.ts";
