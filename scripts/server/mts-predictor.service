@@ -1,0 +1,22 @@
+# The arrival model, training on the recorder's live logs: starts at boot, restarts if it stops.
+# Installed by setup-recorder.sh. Scorecard: /var/lib/mts-recorder/model/scorecard.json
+[Unit]
+Description=Triton Trails live arrival model
+After=mts-recorder.service
+Wants=mts-recorder.service
+
+[Service]
+User=mts
+WorkingDirectory=/opt/ucsd-campus-nav
+Environment=LOG_DIR=/var/lib/mts-recorder
+Environment=MODEL_DIR=/var/lib/mts-recorder/model
+Environment=GTFS_ZIP=/var/lib/mts-recorder/gtfs/mts.zip
+Environment=NODE_OPTIONS=--max-old-space-size=320
+# Fewer malloc arenas: Node otherwise holds on to memory it has freed.
+Environment=MALLOC_ARENA_MAX=2
+ExecStart=/opt/ucsd-campus-nav/node_modules/.bin/tsx scripts/prediction/live.ts
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

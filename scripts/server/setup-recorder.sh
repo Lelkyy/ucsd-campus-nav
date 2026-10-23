@@ -63,12 +63,18 @@ if ! sudo test -s "$KEY_FILE"; then
   sudo chmod 600 "$KEY_FILE"
 fi
 
-echo "== Service"
-sudo cp "$APP/scripts/server/mts-recorder.service" /etc/systemd/system/mts-recorder.service
+echo "== Services: the recorder, and the arrival model learning from it"
+for svc in mts-recorder mts-predictor; do
+  sudo cp "$APP/scripts/server/$svc.service" /etc/systemd/system/$svc.service
+done
 sudo systemctl daemon-reload
-sudo systemctl enable --quiet mts-recorder
-sudo systemctl restart mts-recorder
+for svc in mts-recorder mts-predictor; do
+  sudo systemctl enable --quiet $svc
+  sudo systemctl restart $svc
+done
 sleep 20
-sudo journalctl -u mts-recorder --no-pager -n 6
+sudo journalctl -u mts-recorder --no-pager -n 4
+sudo journalctl -u mts-predictor --no-pager -n 4
 echo
-echo "Recording. Watch it with:  sudo journalctl -u mts-recorder -f"
+echo "Running. Watch them with:  sudo journalctl -u mts-recorder -f   and   sudo journalctl -u mts-predictor -f"
+echo "The model's scorecard:     cat /var/lib/mts-recorder/model/scorecard.json"

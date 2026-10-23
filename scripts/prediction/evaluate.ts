@@ -27,7 +27,7 @@ import { measurePath } from "../../packages/core/src/liveTransit.ts";
 import { reachedTimes, stopDistances, tripProgress } from "../../packages/core/src/arrivals.ts";
 import { HORIZONS, learnAt, OnlineArrivalModel, type ArrivalContext, type ArrivalPrediction } from "../../packages/core/src/arrivalModel.ts";
 import type { LngLat } from "../../packages/core/src/types.ts";
-import { loadTrips } from "./gtfs.ts";
+import { loadTrips, tripSchedule } from "./gtfs.ts";
 
 const ROOT = join(import.meta.dirname, "../..");
 const LOG_DIR = process.argv[2] ?? join(ROOT, "data/private/mts-log");
@@ -81,12 +81,6 @@ const timetable = loadTrips(GTFS, new Set(fixesByTrip.keys()));
 console.log(`${timetable.size} of the trips with fixes are in MTS's timetable.`);
 
 // --- 2. Each trip's progress, how late it was at each fix, and when it reached each stop.
-const midnight = (t: number, daysBack: number) => {
-  const d = new Date(t);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - daysBack);
-  return d.getTime();
-};
 interface Point { t: number; rx: number; along: number; /** Seconds behind the timetable. */ delay: number }
 interface TripState { routeId: string; stops: { stopId: string; sched: number; actual?: number }[]; points: Point[] }
 const trips = new Map<string, TripState>();
@@ -98,19 +92,7 @@ for (const [tripId, trip] of timetable) {
   const fixes = fixesByTrip.get(tripId)!;
   const path = measurePath(trip.shape);
   const alongs = stopDistances(path, trip.stops.map((s) => s.lngLat));
-  const first = Math.min(...fixes.map((f) => f.t));
-  // The service day: whichever midnight puts the first scheduled stop nearest the first fix.
-  const base = [0, 1].map((k) => midnight(first, k)).sort((a, b) => Math.abs(a + trip.stops[0].sched * 1000 - first) - Math.abs(b + trip.stops[0].sched * 1000 - first))[0];
-  const sched = trip.stops.map((s) => base + s.sched * 1000);
-  const schedAt = (along: number) => {
-    if (along <= alongs[0]) return sched[0];
-    for (let k = 1; k < alongs.length; k++) {
-      if (along > alongs[k]) continue;
-      const span = alongs[k] - alongs[k - 1];
-      return span > 0 ? sched[k - 1] + ((along - alongs[k - 1]) / span) * (sched[k] - sched[k - 1]) : sched[k];
-    }
-    return sched[sched.length - 1];
-  };
+  const { sched, schedAt } = tripSchedule(trip, alongs, Math.min(...fixes.map((f) => f.t)));
   const byT = new Map(fixes.map((f) => [f.t, f]));
   const points = tripProgress(path, fixes).map((p) => ({ ...p, rx: byT.get(p.t)?.rx ?? p.t, delay: (p.t - schedAt(p.along)) / 1000 }));
   const actuals = reachedTimes(points, alongs);
