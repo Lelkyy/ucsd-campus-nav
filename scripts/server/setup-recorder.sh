@@ -24,12 +24,21 @@ if ! swapon --show | grep -q /swapfile; then
   echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
 fi
 
-echo "== Node.js 22 and git"
-if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
-  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-  sudo apt-get install -y nodejs
-fi
+echo "== Node.js 20 or newer, and git"
+sudo apt-get update -qq
 sudo apt-get install -y git
+node_major() { command -v node >/dev/null && node -p 'process.versions.node.split(".")[0]' || echo 0; }
+# Debian 13 and Ubuntu 24.04 ship Node 20 or newer; older releases get it from NodeSource.
+if [ "$(node_major)" -lt 20 ]; then
+  apt_major=$(apt-cache policy nodejs | sed -n 's/^ *Candidate: \([0-9]*\).*/\1/p')
+  if [ "${apt_major:-0}" -ge 20 ]; then
+    sudo apt-get install -y nodejs npm
+  else
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+  fi
+fi
+echo "Node $(node --version)"
 
 echo "== The code, on $BRANCH"
 id mts >/dev/null 2>&1 || sudo useradd --system --home-dir "$DATA" --create-home --shell /usr/sbin/nologin mts
