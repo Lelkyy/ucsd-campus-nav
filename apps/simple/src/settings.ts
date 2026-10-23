@@ -7,6 +7,15 @@ export const settings = {
   livePollMs: 10_000,
   /** Leave empty to call MTS from the browser. Set this to your own server later, e.g. "/api/vehicles". */
   livePositionsUrl: "",
+  /**
+   * The arrival model's server (scripts/prediction/live.ts), which says where each bus is going between fixes.
+   * From VITE_MODEL_URL in apps/web/.env.local, e.g. http://<server>:8787. Empty: buses glide at their recent speed.
+   */
+  modelUrl: (import.meta.env.VITE_MODEL_URL as string | undefined) ?? "",
+  /** How often to ask the model for the paths of the buses in view. */
+  modelPollMs: 10_000,
+  /** How often to redraw moving buses. */
+  frameMs: 100,
   /** Campus map starts here (zoom and limits as in the full app, apps/web). */
   center: [-117.2376, 32.8801] as [number, number],
   zoom: 15.6,

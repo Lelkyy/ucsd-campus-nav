@@ -12,16 +12,22 @@
  *   model.json        everything learned (the weights, running averages and scores);
  *   predictions.json  the current prediction for every stop ahead of every active trip, with MTS's;
  *   scorecard.json    the last hour of settled predictions: our error vs MTS's, by horizon.
- * And logs the scorecard. Environment: LOG_DIR, MODEL_DIR, GTFS_ZIP, WARM_HOURS.
+ * And logs the scorecard. Environment: LOG_DIR, MODEL_DIR, GTFS_ZIP, WARM_HOURS, PORT.
+ *
+ * Serves where every bus is going, for the map to move them between GPS fixes (GET /vehicles?bbox=w,s,e,n):
+ * each bus's last fix, then each of its next stops at the time the model predicts it gets there, along its
+ * route shape: [lng, lat, time (s)] points to move it along in real time. As the model learns, the buses
+ * move more like the real ones.
  */
 process.env.TZ = "America/Los_Angeles";
 
+import { createServer } from "node:http";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { learnAt, HORIZONS, OnlineArrivalModel, type ArrivalContext, type ArrivalPrediction } from "../../packages/core/src/arrivalModel.ts";
 import { reachedTimes, stopDistances, tripProgress, type Progress } from "../../packages/core/src/arrivals.ts";
-import { measurePath, type MeasuredPath } from "../../packages/core/src/liveTransit.ts";
+import { measurePath, pointAlong, type MeasuredPath } from "../../packages/core/src/liveTransit.ts";
 import type { LngLat } from "../../packages/core/src/types.ts";
 import { Timetable, tripSchedule, type StaticTrip } from "./gtfs.ts";
 
@@ -31,6 +37,7 @@ const MODEL_DIR = process.env.MODEL_DIR ?? join(ROOT, "data/private/mts-model");
 const GTFS = process.env.GTFS_ZIP ?? join(ROOT, "data/raw/gtfs/mts.zip");
 const GTFS_URL = "https://www.sdmts.com/google_transit_files/google_transit.zip";
 const WARM_HOURS = Number(process.env.WARM_HOURS ?? 48);
+const PORT = Number(process.env.PORT ?? 8787);
 
 /** Predictions further ahead aren't made. */
 const MAX_AHEAD_MS = 60 * 60_000;
@@ -254,6 +261,81 @@ function writeOut() {
   console.log(`${card.at} learned ${card.learnedFrom.toLocaleString()}, ${card.activeTrips} trips, ${card.waitingToLearn.toLocaleString()} waiting, memory ${mb(mem.heapUsed)} MB used, ${mb(mem.rss)} MB held. Last hour: ${line || "nothing settled yet"}`);
 }
 
+// --- Where each bus is going: its last fix, then its next stops at the model's predicted times.
+/** Stops ahead in a bus's path, and how far ahead in time. */
+const PATH_STOPS = 4;
+const PATH_AHEAD_MS = 15 * 60_000;
+/** No bus covers ground faster than this; predicted times are spaced at least this far apart (m/s). */
+const TOP_SPEED = 20;
+
+interface VehiclePath { id: string; trip: string; route?: string; path: [number, number, number][] }
+
+function vehiclePaths(bbox?: number[]): VehiclePath[] {
+  const wall = Date.now();
+  const out: VehiclePath[] = [];
+  for (const t of trips.values()) {
+    if (!t.timetable || !t.points.length) continue;
+    const last = t.points[t.points.length - 1];
+    if (wall - last.t > 2 * STALE_FIX_MS) continue;
+    const fix = t.fixes.find((f) => f.t === last.t);
+    if (!fix?.v) continue;
+    const { path, alongs, stops } = t.timetable;
+    const start = pointAlong(path, last.along).lngLat;
+    if (bbox && (start[0] < bbox[0] || start[1] < bbox[1] || start[0] > bbox[2] || start[1] > bbox[3])) continue;
+    // Waypoints: [meters along, time]. The next stops, at the model's times, kept in order and physically possible.
+    const ways: [number, number][] = [[last.along, last.t]];
+    for (let i = 0; i < stops.length && ways.length <= PATH_STOPS; i++) {
+      if (alongs[i] <= last.along + 5 || t.actual[i] !== undefined) continue;
+      const s = served.get(`${t.id}|${stops[i].stopId}`);
+      if (!s) continue;
+      const [pa, pt] = ways[ways.length - 1];
+      // Overdue: it's due any moment, not in the past.
+      const at = Math.max(s.at, pt + ((alongs[i] - pa) / TOP_SPEED) * 1000, ways.length === 1 ? wall + 5_000 : 0);
+      if (at - wall > PATH_AHEAD_MS) break;
+      ways.push([alongs[i], at]);
+    }
+    const pts: [number, number, number][] = [[start[0], start[1], last.t]];
+    for (let w = 1; w < ways.length; w++) {
+      const [a0, t0] = ways[w - 1];
+      const [a1, t1] = ways[w];
+      // The route's own bends between the two, each at its share of the time.
+      for (let k = 0; k < path.points.length; k++) {
+        const a = path.at[k];
+        if (a <= a0 || a >= a1) continue;
+        pts.push([path.points[k][0], path.points[k][1], t0 + ((a - a0) / (a1 - a0)) * (t1 - t0)]);
+      }
+      const end = pointAlong(path, a1).lngLat;
+      pts.push([end[0], end[1], t1]);
+    }
+    out.push({
+      id: fix.v,
+      trip: t.id,
+      route: t.route,
+      path: pts.map(([x, y, tt]) => [Math.round(x * 1e6) / 1e6, Math.round(y * 1e6) / 1e6, Math.round(tt / 100) / 10]),
+    });
+  }
+  return out;
+}
+
+function serve() {
+  createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://x");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "no-store");
+    if (url.pathname === "/vehicles") {
+      const bbox = url.searchParams.get("bbox")?.split(",").map(Number);
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ at: Date.now() / 1000, vehicles: vehiclePaths(bbox?.length === 4 && bbox.every(Number.isFinite) ? bbox : undefined) }));
+    } else if (url.pathname === "/scorecard") {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(scorecard()));
+    } else {
+      res.statusCode = 404;
+      res.end();
+    }
+  }).listen(PORT, () => console.log(`Serving vehicle paths on port ${PORT}.`));
+}
+
 // --- Reading the log files.
 const hourOf = (name: string) => Date.parse(`${name.slice(0, 13)}:00:00Z`);
 function linesOf(text: string, cb: (r: Row) => void) {
@@ -318,6 +400,7 @@ async function main() {
   follow();
   console.log(`Warmed up: learned from ${model.learned.toLocaleString()} predictions. Following ${LOG_DIR}.`);
   writeOut();
+  serve();
   setInterval(follow, TAIL_MS);
   setInterval(() => ensureGtfs().catch((e) => console.error(String(e))), REFRESH_MS);
   setInterval(writeOut, WRITE_MS);

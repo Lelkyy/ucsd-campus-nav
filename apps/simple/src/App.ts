@@ -10,6 +10,9 @@ import {
 } from "@campus/core";
 import { Campus } from "./campus/loadCampus.ts";
 import { LiveFeed } from "./live/LiveFeed.ts";
+import { ModelFeed } from "./live/ModelFeed.ts";
+import { VehicleMotion } from "./live/Motion.ts";
+import { settings } from "./settings.ts";
 import { CampusMap } from "./map/CampusMap.ts";
 import { TripPlanner } from "./trip/TripPlanner.ts";
 
@@ -37,10 +40,16 @@ export class App {
     }, this.campus.graph.data.bbox);
     await this.map.showTransit(this.campus.transit);
     this.root.status.textContent = "Campus loaded. Buses update every few seconds.";
+    // Buses keep moving between GPS fixes: along the paths the arrival model predicts, redrawn every frame.
+    const motion = new VehicleMotion(this.campus.transit);
     new LiveFeed(
-      (vehicles) => void this.map.showVehicles(vehicles),
+      (vehicles) => motion.update(vehicles),
       (message) => (this.root.status.textContent = message),
     ).start();
+    new ModelFeed(() => this.map.bounds(), (paths) => motion.setPaths(paths)).start();
+    window.setInterval(() => {
+      if (!document.hidden) void this.map.showVehicles(motion.positions());
+    }, settings.frameMs);
     this.bindSearch("from", (hit) => {
       this.from = hit;
       this.drawTrip();

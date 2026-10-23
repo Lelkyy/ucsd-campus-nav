@@ -128,6 +128,13 @@ export class CampusMap {
     this.map.fitBounds(bounds, { padding: panelPadding(), maxZoom: 17.5, duration: 600 });
   }
 
+  /** What's in view, with half a view's margin on every side: [west, south, east, north]. */
+  bounds(): [number, number, number, number] {
+    const b = this.map.getBounds();
+    const [dx, dy] = [(b.getEast() - b.getWest()) / 2, (b.getNorth() - b.getSouth()) / 2];
+    return [b.getWest() - dx, b.getSouth() - dy, b.getEast() + dx, b.getNorth() + dy];
+  }
+
   focus(at: LngLat): void {
     this.map.flyTo({ center: at, zoom: Math.max(this.map.getZoom(), 16) });
   }
