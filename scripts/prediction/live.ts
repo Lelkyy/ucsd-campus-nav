@@ -11,7 +11,9 @@
  * Writes to MODEL_DIR (default data/private/mts-model) every few minutes:
  *   model.json        everything learned (the weights, running averages and scores);
  *   predictions.json  the current prediction for every stop ahead of every active trip, with MTS's;
- *   scorecard.json    the last hour of settled predictions: our error vs MTS's, by horizon.
+ *   scorecard.json    the last hour of settled predictions: our error vs MTS's, by horizon;
+ *   accuracy.sqlite   every prediction it has been scored on, to see it improve over days and weeks
+ *                     (scripts/prediction/accuracy.ts; charted at GET /accuracy).
  * And logs the scorecard. Environment: LOG_DIR, MODEL_DIR, GTFS_ZIP, WARM_HOURS, PORT.
  *
  * Serves where every bus is going, for the map to move them between GPS fixes (GET /vehicles?bbox=w,s,e,n):
@@ -29,6 +31,8 @@ import { learnAt, HORIZONS, OnlineArrivalModel, type ArrivalContext, type Arriva
 import { reachedTimes, stopDistances, tripProgress, type Progress } from "../../packages/core/src/arrivals.ts";
 import { measurePath, pointAlong, type MeasuredPath } from "../../packages/core/src/liveTransit.ts";
 import type { LngLat } from "../../packages/core/src/types.ts";
+import { AccuracyDb, type ScoredPrediction } from "./accuracy.ts";
+import { ACCURACY_PAGE } from "./accuracyPage.ts";
 import { Timetable, tripSchedule, type StaticTrip } from "./gtfs.ts";
 
 const ROOT = join(import.meta.dirname, "../..");
@@ -76,6 +80,8 @@ const saved = existsSync(join(MODEL_DIR, "model.json")) && process.env.FRESH !==
 const model = saved?.model ? OnlineArrivalModel.fromJSON(saved.model) : new OnlineArrivalModel();
 /** Predictions made before this were learned from in an earlier run. */
 const learnedUpTo: number = saved?.model ? (saved.now ?? 0) : 0;
+mkdirSync(MODEL_DIR, { recursive: true });
+const accuracy = new AccuracyDb(join(MODEL_DIR, "accuracy.sqlite"));
 const trips = new Map<string, Trip>();
 /** Each bus's latest progress, on whatever trip it's running. */
 const vehicles = new Map<string, { rx: number; t: number; delay: number; trip: string }>();
@@ -218,15 +224,31 @@ function keep(key: string): boolean {
 function learnDue() {
   for (const t of trips.values()) refresh(t);
   const still: Pending[] = [];
+  const scored: ScoredPrediction[] = [];
   for (const q of pending) {
     const actual = trips.get(q.trip)?.actual[q.stop];
     if (actual !== undefined && learnAt(q.c, actual) <= now) {
       if (q.c.tau <= learnedUpTo) continue;
       model.learn(q.c, q.p, actual);
-      settled.push({ at: now, b: bucketOf((q.c.mts - q.c.tau) / 60_000), ours: Math.abs(q.p.at - actual) / 1000, mts: Math.abs(q.c.mts - actual) / 1000 });
+      const b = bucketOf((q.c.mts - q.c.tau) / 60_000);
+      settled.push({ at: now, b, ours: Math.abs(q.p.at - actual) / 1000, mts: Math.abs(q.c.mts - actual) / 1000 });
+      scored.push({
+        trip: q.trip,
+        stop: q.c.stop,
+        route: q.c.route,
+        madeAt: q.c.tau,
+        horizon: `${HORIZONS[b]}-${HORIZONS[b + 1]} min`,
+        aheadS: (q.c.mts - q.c.tau) / 1000,
+        actual,
+        mts: q.c.mts,
+        ours: q.p.at,
+        servedBy: q.p.by,
+        settledAt: now,
+      });
     } else if (now - q.c.tau < FORGET_MS) still.push(q);
   }
   pending = still;
+  accuracy.add(scored);
   settled = settled.filter((s) => now - s.at <= 3600_000);
   for (const [id, t] of trips) if (now - t.lastSeen > FORGET_MS) trips.delete(id);
 }
@@ -340,6 +362,14 @@ function serve() {
       const bbox = url.searchParams.get("bbox")?.split(",").map(Number);
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ at: Date.now() / 1000, vehicles: vehiclePaths(bbox?.length === 4 && bbox.every(Number.isFinite) ? bbox : undefined) }));
+    } else if (url.pathname === "/accuracy") {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.end(ACCURACY_PAGE);
+    } else if (url.pathname === "/accuracy.json") {
+      const by = url.searchParams.get("by") === "day" ? "day" : "hour";
+      const hours = Math.min(24 * 365, Number(url.searchParams.get("hours")) || (by === "day" ? 24 * 90 : 72));
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ by, scored: accuracy.count(), learnedFrom: model.learned, rows: accuracy.history(by, hours) }));
     } else if (url.pathname === "/scorecard") {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(scorecard()));

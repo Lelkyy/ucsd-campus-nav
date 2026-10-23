@@ -12,6 +12,7 @@ starting from MTS's own predictions and learning, from every bus that arrives, h
 | `packages/core/src/arrivals.ts` | Ground truth: snaps a trip's GPS fixes to its route shape and finds when the bus reached each stop. |
 | `packages/core/src/arrivalModel.ts` | The online model (below). |
 | `npm run predict:live` (`scripts/prediction/live.ts`) | Runs the model around the clock on the recorder's logs: predicts every stop ahead every minute, learns as buses arrive, writes the model, current predictions and a scorecard to `data/private/mts-model`. |
+| `scripts/prediction/accuracy.ts` | The accuracy database: every prediction the live model is scored on (SQLite, `accuracy.sqlite` in the model folder), with views `accuracy_by_hour` and `accuracy_by_day`. Charted at `GET /accuracy` on the model server. |
 | `npm run evaluate:prediction` (`scripts/prediction/evaluate.ts`) | Replays the recordings in time order and scores MTS, the timetable and the model side by side. |
 | `scripts/server/` | One command to run the recorder and the live model as services on a Linux server (Google Cloud e2-micro; logs in `/var/lib/mts-recorder`, model in `/var/lib/mts-recorder/model`). |
 
@@ -41,6 +42,17 @@ It predicts MTS's error, not the arrival from scratch, and learns from every arr
 First results, 3 hours of a weekday afternoon (last hour, settled predictions): 0–2 minutes ahead, 46 s average
 error against MTS's 56 s; 2–5 minutes, 72 s against 79 s; further ahead it is still learning and serves MTS.
 Time-of-day and weekday effects need weeks; those are what the server's recordings are for.
+
+## Seeing it improve
+
+The model server (port 8787) serves:
+
+- `/accuracy`: a page charting our average error against MTS's, hour by hour or day by day, for each horizon.
+- `/accuracy.json?by=hour|day&hours=N`: the same numbers.
+- `/scorecard`: the last hour, as the log line shows it.
+- `/vehicles?bbox=w,s,e,n`: where each bus in the box is going (what the app moves buses along).
+
+Or query the database directly: `SELECT * FROM accuracy_by_day;` in `accuracy.sqlite`.
 
 ## Next
 
