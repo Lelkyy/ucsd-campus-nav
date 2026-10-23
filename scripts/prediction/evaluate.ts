@@ -1,6 +1,7 @@
 /**
  * Scores bus arrival predictions against when the buses actually arrived, from the recordings
- * (scripts/record-mts.ts). Usage: npx tsx scripts/prediction/evaluate.ts [log dir]
+ * (scripts/record-mts.ts). Usage: npm run evaluate:prediction [-- log dir]
+ * WORST=10 also lists the trips MTS got most wrong at 0–2 minutes ahead, to check the truth by hand.
  *
  * 1. Truth: each trip's GPS fixes, snapped to its route shape from MTS's timetable (data/raw/gtfs/mts.zip),
  *    give the moment it reached each stop (packages/core/src/arrivals.ts).
