@@ -17,11 +17,12 @@ KEY_FILE=/etc/mts-recorder.env
 
 echo "== Swap: 1 GB of memory is tight for installing packages"
 if ! swapon --show | grep -q /swapfile; then
-  sudo fallocate -l 1G /swapfile
-  sudo chmod 600 /swapfile
-  sudo mkswap /swapfile >/dev/null
-  sudo swapon /swapfile
-  echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
+  if sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile >/dev/null && sudo swapon /swapfile; then
+    grep -q '^/swapfile ' /etc/fstab || echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
+  else
+    echo "Couldn't add swap here; carrying on without it."
+    sudo rm -f /swapfile
+  fi
 fi
 
 echo "== Node.js 20 or newer, and git"
