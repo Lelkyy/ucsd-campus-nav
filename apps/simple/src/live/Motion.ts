@@ -10,9 +10,11 @@ import { measurePath, pointAlong, snapAlong, type LiveVehicle, type LngLat, type
  * doesn't, and gets more accurate as the model learns.
  *
  * Without the model (no server, or a bus it doesn't cover): along its route at the speed it has been going, for
- * up to two minutes past its fix; off the routes we have shapes for, in a straight line, briefly.
+ * up to two minutes past its fix.
  *
- * Either way, new information eases the bus to its new spot rather than teleporting it.
+ * Buses stay on their routes: the model's paths follow the route shape, a fix is drawn snapped onto its route, and
+ * when new information comes the bus eases to its new spot along the route, never across a corner. Only a bus on
+ * a route with no known shape is drawn at its GPS fix, as reported.
  */
 
 /** A bus's path from the model: [lng, lat, time (s)], times rising. */
@@ -20,12 +22,16 @@ export type TimedPath = [number, number, number][];
 
 /** Keep moving at most this long past the fix along a route (ms). */
 const ALONG_ROUTE_MS = 120_000;
-/** Off a known route, in a straight line, at most this long (ms). */
-const STRAIGHT_MS = 45_000;
 /** A fix this close to a route's shape is on it (m). */
 const ON_ROUTE_M = 40;
 /** A new fix eases the vehicle from where it was drawn over this long (ms). */
 const EASE_MS = 1500;
+/**
+ * The model's path for a bus is used though the bus has a newer fix than it was made from, up to this much
+ * newer (ms): it already says where the bus has got to since, on its route, and the server is a few seconds
+ * behind MTS. Older than this, the bus's own fix and speed take over.
+ */
+const PATH_LAG_MS = 120_000;
 /** Faster than this between fixes is a GPS jump, not driving (m/s). */
 const MAX_SPEED = 25;
 /** Fixes further apart than this don't give a speed (ms). */
@@ -38,8 +44,6 @@ interface Track {
   along: number;
   /** Along the route (m/s). */
   speed: number;
-  /** Off a known route: degrees per ms, east and north. */
-  velocity?: [number, number];
   /** The model's path for it, when there is one. */
   plan?: TimedPath;
   /** Where it was drawn when the new fix or path came, to ease from. */
@@ -63,11 +67,11 @@ export class VehicleMotion {
     }
   }
 
-  /** The model's latest paths, by vehicle id. A path older than the vehicle's newest fix is ignored. */
+  /** The model's latest paths, by vehicle id. A stopped bus's path is one point: its fix, on its route. */
   setPaths(paths: Map<string, TimedPath>, now = Date.now()) {
     for (const [id, t] of this.tracks) {
       const plan = paths.get(id);
-      const usable = plan && plan.length > 1 && plan[0][2] * 1000 >= t.vehicle.fixAt - 30_000 ? plan : undefined;
+      const usable = plan && plan.length && plan[0][2] * 1000 >= t.vehicle.fixAt - PATH_LAG_MS ? plan : undefined;
       if (usable === t.plan) continue;
       t.easeFrom = this.position(t, now);
       t.easeAt = now;
@@ -93,7 +97,7 @@ export class VehicleMotion {
         speed: 0,
         easeAt: now,
         ...(shown ? { easeFrom: shown } : {}),
-        ...(old?.plan && old.plan[0][2] * 1000 >= v.fixAt - 30_000 ? { plan: old.plan } : {}),
+        ...(old?.plan && old.plan[0][2] * 1000 >= v.fixAt - PATH_LAG_MS ? { plan: old.plan } : {}),
       };
       // The route shape it's on: near this fix (and the last one), moving forward along it.
       let best: { path: MeasuredPath; along: number; off: number; prev?: number } | undefined;
@@ -113,10 +117,6 @@ export class VehicleMotion {
           // Smooth a little: half the last speed, half this one.
           track.speed = old?.path === best.path ? (old.speed + v1) / 2 : v1;
         }
-      } else if (old && dt > 5_000 && dt < MAX_GAP_MS) {
-        const velocity: [number, number] = [(v.lngLat[0] - old.vehicle.lngLat[0]) / dt, (v.lngLat[1] - old.vehicle.lngLat[1]) / dt];
-        const mps = Math.hypot(velocity[0] * 93_000, velocity[1] * 111_000) * 1000;
-        if (mps > 1 && mps < MAX_SPEED) track.velocity = velocity;
       }
       this.tracks.set(v.id, track);
     }
@@ -140,18 +140,18 @@ export class VehicleMotion {
   private position(t: Track, now: number): LngLat {
     let at: LngLat = t.vehicle.lngLat;
     if (t.plan) at = planAt(t.plan, now / 1000);
-    else if (t.path && t.speed > 0) at = pointAlong(t.path, this.along(t, now)).lngLat;
-    else if (t.velocity) {
-      const dt = Math.min(STRAIGHT_MS, Math.max(0, now - t.vehicle.fixAt));
-      at = [t.vehicle.lngLat[0] + t.velocity[0] * dt, t.vehicle.lngLat[1] + t.velocity[1] * dt];
-    }
+    else if (t.path) at = pointAlong(t.path, this.along(t, now)).lngLat;
     if (!t.easeFrom) return at;
     const k = Math.min(1, (now - t.easeAt) / EASE_MS);
     if (k >= 1) {
       delete t.easeFrom;
       return at;
     }
-    return [t.easeFrom[0] + (at[0] - t.easeFrom[0]) * k, t.easeFrom[1] + (at[1] - t.easeFrom[1]) * k];
+    // Part way from where it was drawn, put back on its route so it doesn't cut a corner.
+    const mid: LngLat = [t.easeFrom[0] + (at[0] - t.easeFrom[0]) * k, t.easeFrom[1] + (at[1] - t.easeFrom[1]) * k];
+    if (t.plan) return nearestOnPlan(t.plan, mid);
+    if (t.path) return pointAlong(t.path, snapAlong(t.path, mid).along).lngLat;
+    return mid;
   }
 }
 
@@ -167,6 +167,24 @@ function planAt(plan: TimedPath, t: number): LngLat {
   }
   const end = plan[plan.length - 1];
   return [end[0], end[1]];
+}
+
+/** The point of a timed path nearest `p`. */
+function nearestOnPlan(plan: TimedPath, p: LngLat): LngLat {
+  const kx = Math.cos((p[1] * Math.PI) / 180);
+  let best: LngLat = [plan[0][0], plan[0][1]];
+  let bestD = Infinity;
+  for (let k = 1; k < plan.length; k++) {
+    const [ax, ay] = plan[k - 1];
+    const [bx, by] = plan[k];
+    const [dx, dy] = [(bx - ax) * kx, by - ay];
+    const len2 = dx * dx + dy * dy;
+    const f = len2 ? Math.max(0, Math.min(1, (((p[0] - ax) * kx) * dx + (p[1] - ay) * dy) / len2)) : 0;
+    const q: LngLat = [ax + (bx - ax) * f, ay + (by - ay) * f];
+    const d = ((q[0] - p[0]) * kx) ** 2 + (q[1] - p[1]) ** 2;
+    if (d < bestD) (bestD = d), (best = q);
+  }
+  return best;
 }
 
 /** The way a timed path is heading at `t` (degrees from north), while it's moving. */

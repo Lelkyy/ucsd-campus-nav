@@ -267,12 +267,15 @@ const PATH_STOPS = 4;
 const PATH_AHEAD_MS = 15 * 60_000;
 /** No bus covers ground faster than this; predicted times are spaced at least this far apart (m/s). */
 const TOP_SPEED = 20;
+/** Without a prediction ahead, a bus keeps its recent speed along its route for this long (ms). */
+const GLIDE_MS = 120_000;
 
 interface VehiclePath { id: string; trip: string; route?: string; path: [number, number, number][] }
 
 function vehiclePaths(bbox?: number[]): VehiclePath[] {
   const wall = Date.now();
-  const out: VehiclePath[] = [];
+  /** Each bus once, on the trip it reported from last (a bus that has just started its next trip is on both). */
+  const out = new Map<string, VehiclePath & { fixAt: number }>();
   for (const t of trips.values()) {
     if (!t.timetable || !t.points.length) continue;
     const last = t.points[t.points.length - 1];
@@ -294,6 +297,15 @@ function vehiclePaths(bbox?: number[]): VehiclePath[] {
       if (at - wall > PATH_AHEAD_MS) break;
       ways.push([alongs[i], at]);
     }
+    // No prediction ahead: along its route at the speed it has been going, for a couple of minutes.
+    if (ways.length === 1) {
+      const prev = [...t.points].reverse().find((p) => last.t - p.t >= 5_000 && last.t - p.t <= STALE_FIX_MS);
+      const speed = prev ? Math.min(TOP_SPEED, (last.along - prev.along) / ((last.t - prev.t) / 1000)) : 0;
+      if (speed > 0.5) {
+        const to = Math.min(path.length, last.along + (speed * GLIDE_MS) / 1000);
+        ways.push([to, last.t + ((to - last.along) / speed) * 1000]);
+      }
+    }
     const pts: [number, number, number][] = [[start[0], start[1], last.t]];
     for (let w = 1; w < ways.length; w++) {
       const [a0, t0] = ways[w - 1];
@@ -307,14 +319,16 @@ function vehiclePaths(bbox?: number[]): VehiclePath[] {
       const end = pointAlong(path, a1).lngLat;
       pts.push([end[0], end[1], t1]);
     }
-    out.push({
+    if ((out.get(fix.v)?.fixAt ?? -Infinity) >= last.t) continue;
+    out.set(fix.v, {
       id: fix.v,
       trip: t.id,
       route: t.route,
+      fixAt: last.t,
       path: pts.map(([x, y, tt]) => [Math.round(x * 1e6) / 1e6, Math.round(y * 1e6) / 1e6, Math.round(tt / 100) / 10]),
     });
   }
-  return out;
+  return [...out.values()].map(({ fixAt: _, ...v }) => v);
 }
 
 function serve() {
