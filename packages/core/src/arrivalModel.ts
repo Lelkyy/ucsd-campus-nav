@@ -48,7 +48,7 @@ const bucketOf = (ahead: number) => {
 };
 
 /** How long after its horizon's far end a prediction waits before it's learned from (ms). */
-const SETTLE_MS = 15 * 60_000;
+const SETTLE_MS = 5 * 60_000;
 
 /**
  * When to learn from a prediction (ms): once the bus has arrived, and not before every bus predicted at that

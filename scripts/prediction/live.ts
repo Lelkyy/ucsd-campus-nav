@@ -6,7 +6,8 @@
  *   - every time MTS's predictions update (about once a minute), predicts every stop ahead of every active trip;
  *   - as buses reach stops (from their GPS fixes, packages/core/src/arrivals.ts), learns from the predictions
  *     made for them, once they've settled (learnAt);
- *   - on start, replays the last WARM_HOURS of recordings to warm up, then follows live.
+ *   - on start, replays the last WARM_HOURS of recordings (default 24), learning from them as if live and
+ *     scoring them into the accuracy database, then follows live. So a restart comes back trained.
  *
  * Writes to MODEL_DIR (default data/private/mts-model) every few minutes:
  *   model.json        everything learned (the weights, running averages and scores);
@@ -40,7 +41,7 @@ const LOG_DIR = process.env.LOG_DIR ?? join(ROOT, "data/private/mts-log");
 const MODEL_DIR = process.env.MODEL_DIR ?? join(ROOT, "data/private/mts-model");
 const GTFS = process.env.GTFS_ZIP ?? join(ROOT, "data/raw/gtfs/mts.zip");
 const GTFS_URL = "https://www.sdmts.com/google_transit_files/google_transit.zip";
-const WARM_HOURS = Number(process.env.WARM_HOURS ?? 48);
+const WARM_HOURS = Number(process.env.WARM_HOURS ?? 24);
 const PORT = Number(process.env.PORT ?? 8787);
 
 /** Predictions further ahead aren't made. */
@@ -51,8 +52,8 @@ const STALE_FIX_MS = 5 * 60_000;
 const GONE_MS = 10 * 60_000;
 /** Trips with nothing new for this long are forgotten. */
 const FORGET_MS = 3 * 3600_000;
-/** Share of predictions kept to learn from: thousands an hour, at a tenth of the memory. */
-const LEARN_SHARE = 0.1;
+/** Share of predictions kept to learn from (all of them would double the memory for little more to learn). */
+const LEARN_SHARE = 0.5;
 /** How often to follow the log, check for a newer timetable, and write out (ms, wall clock). */
 const TAIL_MS = 15_000;
 const REFRESH_MS = 6 * 3600_000;
@@ -75,11 +76,9 @@ interface Trip {
 }
 interface Pending { trip: string; stop: number; c: ArrivalContext; p: ArrivalPrediction }
 
-// Pick up where the last run left off; after a restart the warm-up replay rebuilds trips without learning twice.
-const saved = existsSync(join(MODEL_DIR, "model.json")) && process.env.FRESH !== "1" ? JSON.parse(readFileSync(join(MODEL_DIR, "model.json"), "utf8")) : null;
-const model = saved?.model ? OnlineArrivalModel.fromJSON(saved.model) : new OnlineArrivalModel();
-/** Predictions made before this were learned from in an earlier run. */
-const learnedUpTo: number = saved?.model ? (saved.now ?? 0) : 0;
+// Trained afresh on every start from the recent recordings (the warm-up replay), so a restart loses nothing;
+// model.json is written out to look at, not read back.
+const model = new OnlineArrivalModel();
 mkdirSync(MODEL_DIR, { recursive: true });
 const accuracy = new AccuracyDb(join(MODEL_DIR, "accuracy.sqlite"));
 const trips = new Map<string, Trip>();
@@ -228,7 +227,6 @@ function learnDue() {
   for (const q of pending) {
     const actual = trips.get(q.trip)?.actual[q.stop];
     if (actual !== undefined && learnAt(q.c, actual) <= now) {
-      if (q.c.tau <= learnedUpTo) continue;
       model.learn(q.c, q.p, actual);
       const b = bucketOf((q.c.mts - q.c.tau) / 60_000);
       settled.push({ at: now, b, ours: Math.abs(q.p.at - actual) / 1000, mts: Math.abs(q.c.mts - actual) / 1000 });
